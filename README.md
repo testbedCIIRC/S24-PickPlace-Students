@@ -5,6 +5,13 @@ ssh root@10.100.0.129 "podman run --privileged -p 47555:47555 --detach camera-se
 ```
 Example of the client script is in `realsense_speed_test.py` in Scripts folder.
 
+## Requirements
+pip dependencies only (For the camera streaming):
+```
+pip install ntplib
+pip install opencv-python
+```
+
 
 # Pick & Place Cybertech
 

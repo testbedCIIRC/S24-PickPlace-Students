@@ -152,3 +152,8 @@ if __name__ == "__main__":
             cv2.destroyAllWindows()
             client.close()
             break
+        elif key == ord('s'):
+            img_name = f'frame_{frame_timestamp}.png'
+            cv2.imwrite(img_name, frame_rgb)
+            print(f'Image saved as {img_name}')
+
