@@ -1,8 +1,12 @@
 # Realsense camera streaming
-Start script on the camera server: 
+Start script on the camera server trough ssh: 
+
+``` bash
+ssh root@10.100.0.129 -i .ssh/pickplace-nanobox-key
 ```
-ssh root@10.100.0.129 "podman run --privileged -p 47555:47555 --detach camera-server"
-```
+ask for common ssh key to be able to acces the camera server.
+
+
 Example of the client script is in `realsense_speed_test.py` in Scripts folder.
 
 ## Requirements
