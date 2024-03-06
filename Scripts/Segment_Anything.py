@@ -1,3 +1,15 @@
+"""
+This code is used to generate segmentation of waste on conveyor belt using segment-anything. 
+Input is cropped image of waste on conveyor (cropped so that there is nothing else than conveyor and the waste)
+IMPORTANT: to use this code you have to downald model from https://github.com/facebookresearch/segment-anything?tab=readme-ov-file#model-checkpoints
+there are 3 models - vit_h, vit_l and vit_b. h being most advanced and b the least advanced.
+
+
+TODO:   Save images in .npy for easier acces.
+        Segmented images are not saved with the same name as the original image.
+        There are still some artefact when bad lighting or the conveyor belt is dirty - this may be solved by using better model or with som postptocessing
+"""
+
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
