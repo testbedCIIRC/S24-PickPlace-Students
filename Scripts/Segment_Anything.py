@@ -16,18 +16,36 @@ import matplotlib.pyplot as plt
 import cv2
 import glob
 import os
+import platform
+import re
 import sys
 import segment_anything
 import supervision as sv
+from segment_anything import sam_model_registry, SamAutomaticMaskGenerator, SamPredictor
+import scipy.ndimage as ndimage
 
+
+def fill_holes(mask, num_it = 1):
+    original_dtype = mask.dtype
+    structure = ndimage.generate_binary_structure(2, 2)
+    filled_mask = ndimage.binary_dilation(mask.astype(bool), structure=structure, iterations=num_it)
+    inverted_mask = ~filled_mask
+    smaller_inverted_mask = ndimage.binary_dilation(inverted_mask, structure=structure, iterations=num_it)
+    smaller_mask = ~smaller_inverted_mask 
+    return smaller_mask.astype(original_dtype)* 255
+
+current_platform = platform.system()
 DEVICE = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 MODEL_TYPE = "vit_b"
-from segment_anything import sam_model_registry, SamAutomaticMaskGenerator, SamPredictor
 CHECKPOINT_PATH = "sam_vit_b_01ec64.pth"
 sam = sam_model_registry[MODEL_TYPE](checkpoint=CHECKPOINT_PATH).to(device=DEVICE)
 mask_generator = SamAutomaticMaskGenerator(sam)
 
-images = glob.glob('cropped\\*.jpg') # source folder with images
+ # source folder with images
+if current_platform == 'Windows':
+    images = glob.glob('cropped\\*.jpg')
+else:
+    images = glob.glob('cropped/*.jpg')
 
 
 print("STARTTING SEGMENTATION")
@@ -40,8 +58,13 @@ for i, img in enumerate(images):
     sam_result = mask_generator.generate(image_rgb)
     image_array = np.array(sam_result[0]['segmentation'], dtype=np.uint8) * 255
 
-    num = '{:05d}'.format(i)
-    cv2.imwrite('segmented\\' + num + '.jpg', image_array)
+    image_array = fill_holes(image_array)
+    
+    num = re.search(r'\d+', img).group()
+    if current_platform == 'Windows':
+        cv2.imwrite('segmented\\' + num + '.jpg', image_array)
+    else:
+        cv2.imwrite('segmented/' + num + '.jpg', image_array)
 
     print(f"Segmented {num}")
 
