@@ -6,7 +6,7 @@ import numpy as np
 import cv2
 
 # Local imports
-from src.item import Item
+from src.item import ITEM_TYPE, Item
 
 
 # Setup logging
@@ -120,15 +120,16 @@ class DetectorHSV:
 
         # Detect WHITE PACKETS from white binary mask contours
         for contour in white_contour_list:
-            area_cm2 = abs(cv2.contourArea(contour) * self.homography_determinant)
+            # Compute area in square mm using determinant, divide by 100 to get square cm
+            area_cm2 = abs(cv2.contourArea(contour) * self.homography_determinant) / 100
             object_type = 0
 
             if 130 > area_cm2 > 70:
-                object_type = 1
+                object_type = ITEM_TYPE.SMALL_WHITE_PACKET
             elif 200 > area_cm2 > 140:
-                object_type = 2
+                object_type = ITEM_TYPE.MEDIUM_WHITE_PACKET
             elif 430 > area_cm2 > 300:
-                object_type = 0
+                object_type = ITEM_TYPE.LARGE_WHITE_PACKET
             else:
                 continue
 
@@ -154,11 +155,12 @@ class DetectorHSV:
 
         # Detect BROWN PACKETS from brown binary mask contours
         for contour in brown_contour_list:
-            area_cm2 = abs(cv2.contourArea(contour) * self.homography_determinant)
+            # Compute area in square mm using determinant, divide by 100 to get square cm
+            area_cm2 = abs(cv2.contourArea(contour) * self.homography_determinant) / 100
             object_type = 0
 
             if 195 > area_cm2 > 115:
-                object_type = 3
+                object_type = ITEM_TYPE.MEDIUM_BROWN_PACKET
             else:
                 continue
 

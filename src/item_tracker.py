@@ -111,10 +111,8 @@ class ItemTracker:
         """
 
         labeled_item_list = detected_item_list
-        # If no items are being detected or tracked
-        if len(detected_item_list) == 0 or len(self.tracked_item_list) == 0:
-            return labeled_item_list
-        else:
+        # If some items are being detected and tracked
+        if len(detected_item_list) > 0 and len(self.tracked_item_list) > 0:
             # Create a list of tracked and detected centroids
             trackedCentroids = [item.centroid_px for item in self.tracked_item_list]
             detectCentroids = [item.centroid_px for item in detected_item_list]
@@ -168,7 +166,7 @@ class ItemTracker:
                 self.deregister_item(tracked_item.id)
 
         # Update depth frames of tracked items
-        frame_height, frame_width, frame_channel_count = depth_image.shape
+        frame_height, frame_width = depth_image.shape
         for item in self.tracked_item_list:
             if item.disappeared == 0:
                 # Check if item is far enough from edge
@@ -184,7 +182,8 @@ class ItemTracker:
 
         return self.tracked_item_list
 
-    def draw_tracked_items(self, display_rgb_image: np.ndarray,
+    def draw_tracked_items(self,
+                           display_rgb_image: np.ndarray,
                            conveyor_position_mm: float,
                            text_size: float) -> np.ndarray:
         assert isinstance(display_rgb_image, np.ndarray)

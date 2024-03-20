@@ -399,7 +399,7 @@ class OPCUA_Client:
                          base_id):
         assert isinstance(conveyor_tigger_pos, (int, float))
         assert isinstance(start_pos, list)
-        assert len(start_pos) == 6
+        assert len(start_pos) == 8
         for coord in start_pos:
             assert isinstance(coord, (int, float))
         assert isinstance(pre_pick_pos, list)
@@ -415,7 +415,7 @@ class OPCUA_Client:
         for coord in post_pick_pos:
             assert isinstance(coord, (int, float))
         assert isinstance(place_pos, list)
-        assert len(place_pos) == 6
+        assert len(place_pos) == 8
         for coord in place_pos:
             assert isinstance(coord, (int, float))
         assert isinstance(tool_id, int)
@@ -425,11 +425,13 @@ class OPCUA_Client:
         while True:
             result, message = self.node_robot.call_method(f'{self.robot_ns_idx}:StartPickPlace',
                                                           uatype.Variant(conveyor_tigger_pos, uatype.Double),
-                                                          uatype.Variant(start_pos, uatype.Float),
+                                                          uatype.Variant(start_pos[0:6], uatype.Float), # Coords
+                                                          uatype.Variant(start_pos[6:8], uatype.Byte), # Configuration
                                                           uatype.Variant(pre_pick_pos, uatype.Float),
                                                           uatype.Variant(pick_pos, uatype.Float),
                                                           uatype.Variant(post_pick_pos, uatype.Float),
-                                                          uatype.Variant(place_pos, uatype.Float),
+                                                          uatype.Variant(place_pos[0:6], uatype.Float), # Coords
+                                                          uatype.Variant(place_pos[6:8], uatype.Byte), # Configuration
                                                           uatype.Variant(tool_id, uatype.Byte),
                                                           uatype.Variant(base_id, uatype.Byte))
             if result == STATUS.SUCCESS:

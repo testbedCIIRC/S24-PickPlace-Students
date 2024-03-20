@@ -7,7 +7,7 @@ apriltag_points = "./config/conveyor_points.json"
 level = "INFO"
 
 [graphics]
-text_size = 1.5
+text_size = 1
 show_depth_map = false
 show_fps = true
 
@@ -57,10 +57,6 @@ show_tracked_items = true
 packet_depths = [ 7.0, 5.0, 5.0, 5.0 ]
 min_pick_distance = 800
 max_pick_distance = 1800
-z_offset = 150
-x_pick_offset = 50
-grip_time_offset = 200
-pick_start_x_offset = 25
-max_z = 500
-min_y = 45
-max_y = 470
+moveahead_distance = 200 # How far the robot will move ahead of the item to wait for it
+z_offset = 150 # How high up will the robot be moving the items
+pick_movement_x_distance = 50 # X distance between pre-pick and pick positions

@@ -83,7 +83,7 @@ class Item:
         self.track_frame = 0
 
         # Indicates if the item is marked to be the next item to be sorted
-        self.in_pick_list = False
+        self.being_picked = False
 
         # Number of frames the item has disappeared for
         # TODO: Find out how "disappeared" counter is used
