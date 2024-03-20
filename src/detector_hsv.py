@@ -75,11 +75,8 @@ class DetectorHSV:
 
         item = Item()
         item.set_type(type)
-        item.set_centroid(centroid[0], centroid[1])
-        item.set_homography_matrix(self.homography_matrix)
-        item.set_base_encoder_position(encoder_pos)
-        item.set_bounding_size(w, h)
-        item.add_angle_to_average(angle)
+        item.set_position(centroid[0], centroid[1], encoder_pos)
+        item.set_dimensions(w, h)
 
         return item
 
@@ -88,6 +85,7 @@ class DetectorHSV:
         Detects items using HSV thresholding in an image
         """
         assert isinstance(rgb_image, np.ndarray)
+        assert isinstance(encoder_position, (int, float))
 
         self.detected_items = []
 
@@ -95,8 +93,7 @@ class DetectorHSV:
             log.warning(f'HSV Detector: No homography matrix set')
             return []
 
-        frame_height = rgb_image.shape[0]
-        frame_width = rgb_image.shape[1]
+        frame_height, frame_width = rgb_image.shape
 
         mask = np.zeros((frame_height, frame_width))
 
@@ -194,6 +191,8 @@ class DetectorHSV:
         assert isinstance(rgb_image, np.ndarray)
 
         for item in self.detected_items:
+            assert isinstance(item, Item)
+
             # Draw centroid
             rgb_image = cv2.drawMarker(
                 rgb_image,
@@ -211,8 +210,7 @@ class DetectorHSV:
         Draws binary HSV mask into RGB image
         """
 
-        frame_height = rgb_image.shape[0]
-        frame_width = rgb_image.shape[1]
+        frame_height, frame_width = rgb_image.shape
 
         # Get binary mask
         hsv_image = cv2.cvtColor(rgb_image, cv2.COLOR_BGR2HSV)

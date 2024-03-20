@@ -48,8 +48,7 @@ show_detections = false
 
 [tracking]
 min_frames = 30 # 
-frames_to_deregister = 100 # 
-guard = 50 # When packet depth is cropped, the resulting crop will have this many extra pixels on each side
+frames_to_deregister = 100
 max_item_distance = 400 # Maximal distance which packet can travel when it disappears in frame pixels
 show_tracked_items = true
 

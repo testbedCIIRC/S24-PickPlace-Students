@@ -302,7 +302,7 @@ if __name__ == '__main__':
             
         # Remove items which are beyond safe picking distance from the list
         for item in tracked_item_list:
-            if item.get_centroid_from_encoder_in_mm().x >= config.pick_place.max_pick_distance:
+            if item.get_centroid_from_encoder_in_mm(conveyor_position_mm).x >= config.pick_place.max_pick_distance:
                 del item
         
         # If robot is not busy picking a packet
@@ -310,7 +310,7 @@ if __name__ == '__main__':
             # Get first item which is ready to be sorted
             for item in tracked_item_list:
                 if (not item.being_picked
-                    and item.get_centroid_from_encoder_in_mm().x >= config.pick_place.min_pick_distance):
+                    and item.get_centroid_from_encoder_in_mm(conveyor_position_mm).x >= config.pick_place.min_pick_distance):
 
                     item.being_picked = True
 
@@ -331,8 +331,8 @@ if __name__ == '__main__':
                         start_pos = last_place_position
 
                     pre_pick_pos = [
-                        item.get_centroid_from_encoder_in_mm().x + config.pick_place.moveahead_distance, # X
-                        item.get_centroid_from_encoder_in_mm().y, # Y
+                        item.get_centroid_from_encoder_in_mm(conveyor_position_mm).x + config.pick_place.moveahead_distance, # X
+                        item.get_centroid_from_encoder_in_mm(conveyor_position_mm).y, # Y
                         config.pick_place.z_offset, # Z
                         90.0,
                         0.0,
@@ -341,7 +341,7 @@ if __name__ == '__main__':
 
                     pick_pos = [
                         pre_pick_pos[0] + config.pick_place.pick_movement_x_distance, # X
-                        item.get_centroid_from_encoder_in_mm().y, # Y
+                        item.get_centroid_from_encoder_in_mm(conveyor_position_mm).y, # Y
                         30, # Z
                         90.0,
                         0.0,
@@ -385,15 +385,6 @@ if __name__ == '__main__':
 
         # OTHER FRAME GRAPHICS
         ######################
-
-        # Draw first item depth crop to another window
-        # cv2.imshow("Depth Crop", np.zeros((650, 650)))
-        # for item in tracked_item_list:
-        #     if item.avg_depth_crop is not None:
-        #         colorized_depth_crop = colorizeDepthFrame(item.avg_depth_crop)
-        #         colorized_depth_crop = cv2.resize(colorized_depth_crop, (650, 650))
-        #         cv2.imshow("Item depth map", colorized_depth_crop)
-        #         break
 
         # Show depth frame overlay
         if config.graphics.show_depth_map:
