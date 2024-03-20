@@ -1,0 +1,61 @@
+[file]
+robot_positions = "./config/robot_positions.json"
+apriltag_points = "./config/conveyor_points.json"
+
+[logging]
+# Valid values are "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"
+level = "INFO"
+
+[graphics]
+text_size = 1
+show_depth_map = false
+show_fps = true
+
+[camera]
+ip = "10.100.0.129"
+port = 47555
+
+[opcua]
+ip = "10.100.0.120"
+port = 4840
+username = ""
+password = ""
+cell_namespace_uri = "http://pickplace.ti40.cz"
+robot_namespace_uri = "http://robots.pickplace.ti40.cz"
+conveyor_namespace_uri = "http://conveyor.pickplace.ti40.cz"
+grippers_namespace_uri = "http://grippers.pickplace.ti40.cz"
+
+[homography]
+frames_per_update = 100
+
+[detector]
+type = "HSV" # Valid values are "HSV", "NN1", "NN2", "NN3"
+
+[detector.hsv]
+ignore_vertical_px = 133
+ignore_horizontal_px = 50
+max_ratio_error = 0.5
+white_lower = [60, 0, 85]
+white_upper = [179, 255, 255]
+brown_lower = [0, 33, 57]
+brown_upper = [60, 255, 178]
+show_hsv_mask = false
+show_detections = false
+
+[detector.nn1]
+
+[detection.nn2]
+
+[tracking]
+min_frames = 30 # 
+frames_to_deregister = 100
+max_item_distance = 400 # Maximal distance which packet can travel when it disappears in frame pixels
+show_tracked_items = true
+
+[pick_place]
+packet_depths = [ 7.0, 5.0, 5.0, 5.0 ]
+min_pick_distance = 800
+max_pick_distance = 1800
+moveahead_distance = 200 # How far the robot will move ahead of the item to wait for it
+z_offset = 150 # How high up will the robot be moving the items
+pick_movement_x_distance = 50 # X distance between pre-pick and pick positions
