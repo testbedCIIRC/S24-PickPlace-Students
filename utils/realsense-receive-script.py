@@ -5,6 +5,8 @@ import cv2
 from io import BytesIO
 import numpy as np
 
+from robot_pos import RobotPos
+
 def colorizeDepthFrame(
     depth_frame: np.ndarray, camera_belt_dist_mm: int = 785
 ) -> np.ndarray:
@@ -96,6 +98,12 @@ if __name__ == "__main__":
     client = NumpyArraySocket()
     client.connect((SERVER_IP, SERVER_PORT)) # Connect to the port and host
     print('Client running')
+
+    csv = open(f"positions_{int(time.time())}.csv", "w")
+    csv.write("frame_name,X,Y,Z,A,B,C,Status,Turn\n")
+
+    r = RobotPos()
+    r.connect()
         
     helper_buffer = BytesIO()
     while True:
@@ -151,9 +159,20 @@ if __name__ == "__main__":
         if key == 27: # Esc
             cv2.destroyAllWindows()
             client.close()
+            r.disconnect()
+            csv.close()
             break
         elif key == ord('s'):
             img_name = f'frame_{frame_timestamp}.png'
             cv2.imwrite(img_name, frame_rgb)
-            print(f'Image saved as {img_name}')
 
+            frame = np.concatenate((frame_rgb, frame_depth[...,None]), axis=-1)
+            np.save(f'frame_{frame_timestamp}.npy', frame)
+            print(f'Image saved as {img_name}')
+            
+            p = r.get_position()
+            if p.Valid:
+                print(f"XYZ: {p.X}, {p.Y}, {p.Z}; ABC: {p.A}, {p.B}, {p.C}, Status: {p.Status}, Turn: {p.Turn}")
+                csv.write(f"{img_name},{p.X},{p.Y},{p.Z},{p.A},{p.B},{p.C},{p.Status},{p.Turn}\n")
+            else:
+                print("Position NOT VALID!!!", p)
