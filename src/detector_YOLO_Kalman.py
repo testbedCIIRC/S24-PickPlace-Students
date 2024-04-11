@@ -260,8 +260,8 @@ class YOLODetector_Kalman:
 
             # Check if packet is far enough from edge
             if (
-                packet.centroid_px.x - packet.width / 2 < self.ignore_horizontal_px
-                or packet.centroid_px.x + packet.width / 2
+                packet.centroid_px.x - packet.width_px / 2 < self.ignore_horizontal_px
+                or packet.centroid_px.x + packet.width_px / 2
                 > frame_width - self.ignore_horizontal_px
             ):
                 continue

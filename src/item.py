@@ -35,6 +35,7 @@ class Item:
         self.timestamp_ms = 0
 
         # ID of the item for tracking between frames
+        # Assigned by item tracker
         self.id = None
 
         # Type of the item
@@ -47,8 +48,8 @@ class Item:
         # Last detected position of encoder in pixels
         self.last_encoder_position = 0.0
 
-        # Indicates if the item is marked to be the next item to be sorted
-        self.being_picked = False
+        # Indicates if command to pick this item was sent
+        self.processed = False
 
         # For how many frames has the item disappeared from the camera view
         self.disappeared_frame_count = 0
@@ -63,6 +64,19 @@ class Item:
         self.predicted_class = None
         # Class name of the object for YOLOv8
         self.class_name = None
+
+    #############
+    # Operators #
+    #############
+
+    def __eq__(self, other):
+        if isinstance(other, self.__class__):
+            return self.__dict__ == other.__dict__
+        else:
+            return False
+
+    def __ne__(self, other):
+        return not self.__eq__(other)
 
     ###############
     # Set methods #
@@ -119,12 +133,12 @@ class Item:
     def get_centroid_in_mm(self, homography_matrix: np.ndarray) -> tuple[float, float]:
         assert isinstance(homography_matrix, np.ndarray)
         assert len(homography_matrix.shape) == 2 # Only two dimensions
-        assert homography_matrix.shape[0] == 4 # 4x4 matrix
-        assert homography_matrix.shape[1] == 4
+        assert homography_matrix.shape[0] == 3 # 2D rotation matrix augmented with translation -> 3x3
+        assert homography_matrix.shape[1] == 3
 
         # Transform centroid from pixels to millimeters using a homography matrix
         centroid_mm = np.matmul(
-            self.homography_matrix,
+            homography_matrix,
             np.array([self.centroid_px.x, self.centroid_px.y, 1]),
         )
         return self.PointTuple(centroid_mm[0], centroid_mm[1])
@@ -133,8 +147,8 @@ class Item:
         assert isinstance(encoder_position, (int, float))
         assert isinstance(homography_matrix, np.ndarray)
         assert len(homography_matrix.shape) == 2 # Only two dimensions
-        assert homography_matrix.shape[0] == 4 # 4x4 matrix
-        assert homography_matrix.shape[1] == 4
+        assert homography_matrix.shape[0] == 3 # 2D rotation matrix augmented with translation -> 3x3
+        assert homography_matrix.shape[1] == 3
 
         centroid_mm = self.get_centroid_in_mm(homography_matrix)
         return self.PointTuple(centroid_mm[0] + (encoder_position - self.last_encoder_position), centroid_mm[1])

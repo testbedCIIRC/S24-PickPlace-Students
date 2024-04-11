@@ -20,10 +20,9 @@ ip = "10.100.0.120"
 port = 4840
 username = ""
 password = ""
-cell_namespace_uri = "http://pickplace.ti40.cz"
-robot_namespace_uri = "http://robots.pickplace.ti40.cz"
-conveyor_namespace_uri = "http://conveyor.pickplace.ti40.cz"
-grippers_namespace_uri = "http://grippers.pickplace.ti40.cz"
+workplace_namespace_uri = "http://w4.ti40.cz"
+robots_namespace_uri = "http://robots.ti40.cz"
+transport_namespace_uri = "http://transportation.ti40.cz"
 
 [homography]
 frames_per_update = 100
@@ -40,7 +39,7 @@ white_upper = [179, 255, 255]
 brown_lower = [0, 33, 57]
 brown_upper = [60, 255, 178]
 show_hsv_mask = false
-show_detections = false
+show_detections = true
 
 [detector.nn1]
 
@@ -53,9 +52,10 @@ max_item_distance = 400 # Maximal distance which packet can travel when it disap
 show_tracked_items = true
 
 [pick_place]
+speed_override = 100
 packet_depths = [ 7.0, 5.0, 5.0, 5.0 ]
 min_pick_distance = 800
 max_pick_distance = 1800
-moveahead_distance = 200 # How far the robot will move ahead of the item to wait for it
+moveahead_distance = 180 # How far the robot will move ahead of the item to wait for it
 z_offset = 150 # How high up will the robot be moving the items
-pick_movement_x_distance = 50 # X distance between pre-pick and pick positions
+pick_movement_x_distance = 100 # X distance between pre-pick and pick positions
