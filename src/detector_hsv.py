@@ -93,7 +93,7 @@ class DetectorHSV:
             log.warning(f'HSV Detector: No homography matrix set')
             return []
 
-        frame_height, frame_width = rgb_image.shape
+        frame_height, frame_width, frame_channel_count = rgb_image.shape
 
         mask = np.zeros((frame_height, frame_width))
 
@@ -121,6 +121,8 @@ class DetectorHSV:
             area_cm2 = abs(cv2.contourArea(contour) * self.homography_determinant) / 100
             object_type = 0
 
+            
+
             if 130 > area_cm2 > 70:
                 object_type = ITEM_TYPE.SMALL_WHITE_PACKET
             elif 200 > area_cm2 > 140:
@@ -136,14 +138,15 @@ class DetectorHSV:
             )
 
             # Check for packet squareness
-            side_ratio = packet.width / packet.height
+            side_ratio = packet.width_px / packet.height_px
             if not (1 + self.max_ratio_error) > side_ratio > (1 - self.max_ratio_error):
                 continue
+            
 
             # Check if packet is far enough from edge
             if (
-                packet.centroid_px.x - packet.width / 2 < self.ignore_horizontal_px
-                or packet.centroid_px.x + packet.width / 2
+                packet.centroid_px.x - packet.width_px / 2 < self.ignore_horizontal_px
+                or packet.centroid_px.x + packet.width_px / 2
                 > frame_width - self.ignore_horizontal_px
             ):
                 continue
@@ -167,14 +170,14 @@ class DetectorHSV:
             )
 
             # Check for packet squareness
-            side_ratio = packet.width / packet.height
+            side_ratio = packet.width_px / packet.height_px
             if not (1 + self.max_ratio_error) > side_ratio > (1 - self.max_ratio_error):
                 continue
 
             # Check if packet is far enough from edge
             if (
-                packet.centroid_px.x - packet.width / 2 < self.ignore_horizontal_px
-                or packet.centroid_px.x + packet.width / 2
+                packet.centroid_px.x - packet.width_px / 2 < self.ignore_horizontal_px
+                or packet.centroid_px.x + packet.width_px / 2
                 > (frame_width - self.ignore_horizontal_px)
             ):
                 continue
@@ -210,7 +213,7 @@ class DetectorHSV:
         Draws binary HSV mask into RGB image
         """
 
-        frame_height, frame_width = rgb_image.shape
+        frame_height, frame_width, frame_channel_count = rgb_image.shape
 
         # Get binary mask
         hsv_image = cv2.cvtColor(rgb_image, cv2.COLOR_BGR2HSV)

@@ -128,9 +128,11 @@ class ItemTracker:
     def draw_tracked_items(self,
                            display_rgb_image: np.ndarray,
                            conveyor_position_mm: float,
+                           homography_matrix: np.ndarray,
                            text_size: float) -> np.ndarray:
         assert isinstance(display_rgb_image, np.ndarray)
         assert isinstance(conveyor_position_mm, (int, float))
+        assert isinstance(homography_matrix, np.ndarray)
         assert isinstance(text_size, (int, float))
 
         # Draw packet info
@@ -158,7 +160,7 @@ class ItemTracker:
                 )
 
                 # Draw packet centroid value in milimeters
-                packet_centroid_mm = item.get_centroid_in_mm(conveyor_position_mm)
+                packet_centroid_mm = item.get_centroid_in_mm(homography_matrix)
                 text_centroid_mm = f'X: {round(packet_centroid_mm.x, 2)}, Y: {round(packet_centroid_mm.y, 2)} (mm)'
                 display_rgb_image = drawText(
                     display_rgb_image,

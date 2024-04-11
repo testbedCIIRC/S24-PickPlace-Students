@@ -31,6 +31,63 @@ class ROBOT_COMMAND():
         self.type = type
         self.data = data
 
+# local copy of the OPCUA POS6D class, 
+# since the OPCUA version cannot be picked
+# to be passed across processes using Queue and Manager
+class POS6D():
+    def __init__(
+            self,
+            X: float = 0.0,
+            Y: float = 0.0,
+            Z: float = 0.0,
+            A: float = 0.0,
+            B: float = 0.0,
+            C: float = 0.0,
+            Status: int = 0,
+            Turn: int = 0,
+            ToolFrameID: int = 0,
+            BaseFrameID: int = 0,
+        ):
+        self.X = X
+        self.Y = Y
+        self.Z = Z
+        self.A = A
+        self.B = B
+        self.C = C
+        self.Status = Status
+        self.Turn = Turn
+        self.ToolFrameID = ToolFrameID
+        self.BaseFrameID = BaseFrameID
+
+    def __str__(self):
+        return (f'POS6D(' +
+            f'X={round(self.X, 2)}, ' +
+            f'Y={round(self.Y, 2)}, ' +
+            f'Z={round(self.Z, 2)}, ' +
+            f'A={round(self.A, 2)}, ' +
+            f'B={round(self.B, 2)}, ' +
+            f'C={round(self.C, 2)}, ' +
+            f'Status={self.Status}, ' +
+            f'Turn={self.Turn}, ' +
+            f'ToolFrameID={self.ToolFrameID}, ' +
+            f'BaseFrameID={self.BaseFrameID})')
+
+    def __repr__(self):
+        return (f'POS6D(' +
+            f'X={round(self.X, 2)}, ' +
+            f'Y={round(self.Y, 2)}, ' +
+            f'Z={round(self.Z, 2)}, ' +
+            f'A={round(self.A, 2)}, ' +
+            f'B={round(self.B, 2)}, ' +
+            f'C={round(self.C, 2)}, ' +
+            f'Status={self.Status}, ' +
+            f'Turn={self.Turn}, ' +
+            f'ToolFrameID={self.ToolFrameID}, ' +
+            f'BaseFrameID={self.BaseFrameID})')
+
+# Setup logging
+log = logging.getLogger('PickPlace-Logger')
+
 
 def status_process_handler(logging_config,
                            config,
@@ -58,7 +115,7 @@ def status_process_handler(logging_config,
         opcua_client.node_conveyor_moving_right,
         opcua_client.node_conveyor_position,
         opcua_client.node_conveyor_speed,
-        opcua_client.node_gripper_active,
+        opcua_client.node_robot_gripper_active,
         opcua_client.node_emergency_stop_ok,
         opcua_client.node_operator_safety_ok
     ]
@@ -131,7 +188,8 @@ def status_process_handler(logging_config,
 
 def command_process_handler(logging_config,
                             config,
-                            multiprocess_queue: multiprocessing.Queue):
+                            multiprocess_queue: multiprocessing.Queue,
+                            multiprocess_dict):
     """
     Process to control teh cell using OPCUA methods
     """
@@ -142,6 +200,9 @@ def command_process_handler(logging_config,
         return
 
     opcua_client.get_nodes()
+
+    while not multiprocess_dict['data_valid']:
+        pass
 
     while True:
         try:
@@ -161,14 +222,15 @@ def command_process_handler(logging_config,
                 opcua_client.start_move_to_home()
 
             elif command_type == ROBOT_COMMAND.ROBOT_START_PICK_PLACE:
-                opcua_client.start_pick_place(command_data[0], 
-                                              command_data[1], 
-                                              command_data[2], 
-                                              command_data[3], 
-                                              command_data[4], 
-                                              command_data[5], 
-                                              command_data[6], 
-                                              command_data[7])
+                opcua_client.start_pick_place(multiprocess_dict,
+                                              command_data[0], # Max Pick distance
+                                              command_data[1], # Conveyor Intial position
+                                              command_data[2], # Conveyor Trigger position
+                                              command_data[3], # Start pos
+                                              command_data[4], # Pre Pick pos
+                                              command_data[5], # Pick pos
+                                              command_data[6], # Post Pick pos
+                                              command_data[7]) # Place pos
 
             elif command_type == ROBOT_COMMAND.CONVEYOR_TOGGLE:
                 opcua_client.conveyor_control(command_data[0], command_data[1])
@@ -190,6 +252,33 @@ def command_process_handler(logging_config,
     opcua_client.disconnect()
 
 
+# Load OPCUA data type definitions in the main process
+# Types loaded in separate processes are not accesible in the calling program
+def load_opcua_datatypes(opcua_config):
+    assert isinstance(opcua_config.ip, str)
+    assert isinstance(opcua_config.port, int)
+    assert isinstance(opcua_config.username, str)
+    assert isinstance(opcua_config.password, str)
+
+    ip = opcua_config.ip
+    port = opcua_config.port
+    username = opcua_config.username
+    password = opcua_config.password
+
+    if username and password:
+        client = opcua.Client(f'opc.tcp://{username}:{password}@{ip}:{port}/')
+    else:
+        client = opcua.Client(f'opc.tcp://{ip}:{port}/')
+
+    try:
+        client.connect()
+        client.load_data_type_definitions()
+        client.disconnect()
+        log.info(f'Loaded OPCUA datatypes from server at {ip}:{port}')
+    except Exception as e:
+        log.error(f'Filed to load OPCUA datatypes from server at {ip}:{port}: {e}')
+
+
 class OPCUA_Client:
     """
     Class for OPCUA communication with the PLC.
@@ -203,19 +292,17 @@ class OPCUA_Client:
         assert isinstance(opcua_config.port, int)
         assert isinstance(opcua_config.username, str)
         assert isinstance(opcua_config.password, str)
-        assert isinstance(opcua_config.cell_namespace_uri, str)
-        assert isinstance(opcua_config.robot_namespace_uri, str)
-        assert isinstance(opcua_config.conveyor_namespace_uri, str)
-        assert isinstance(opcua_config.grippers_namespace_uri, str)
+        assert isinstance(opcua_config.workplace_namespace_uri, str)
+        assert isinstance(opcua_config.robots_namespace_uri, str)
+        assert isinstance(opcua_config.transport_namespace_uri, str)
 
         self.ip = opcua_config.ip
         self.port = opcua_config.port
         self.username = opcua_config.username
         self.password = opcua_config.password
-        self.cell_namespace_uri = opcua_config.cell_namespace_uri
-        self.robot_namespace_uri = opcua_config.robot_namespace_uri
-        self.conveyor_namespace_uri = opcua_config.conveyor_namespace_uri
-        self.grippers_namespace_uri = opcua_config.grippers_namespace_uri
+        self.workplace_namespace_uri = opcua_config.workplace_namespace_uri
+        self.robots_namespace_uri = opcua_config.robots_namespace_uri
+        self.transport_namespace_uri = opcua_config.transport_namespace_uri
 
         self.client = None
         self.connected = False
@@ -257,10 +344,8 @@ class OPCUA_Client:
 
         if self.username and self.password:
             self.client = opcua.Client(f'opc.tcp://{self.username}:{self.password}@{self.ip}:{self.port}/', self.timeout)
-            self.log.info(f'Initialized OPCUA client as user {self.username}')
         else:
             self.client = opcua.Client(f'opc.tcp://{self.ip}:{self.port}/', self.timeout)
-            self.log.info(f'Initialized OPCUA client as anonymous user')
         self.client.secure_channel_timeout = self.secure_channel_timeout
         self.client.session_timeout = self.session_timeout
 
@@ -268,10 +353,10 @@ class OPCUA_Client:
             self.client.connect()
             self.client.load_data_type_definitions()
             self.connected = True
-            self.log.info(f'OPCUA client connected to server at {self.ip}')
+            log.info(f'OPCUA client connected to server at {self.ip}:{self.port}')
         except Exception as e:
             self.connected = False
-            self.log.error(f'OPCUA client failed to connect to server at {self.ip}: {e}')
+            log.error(f'OPCUA client failed to connect to server at {self.ip}:{self.port}: {e}')
 
     def disconnect(self):
         """
@@ -280,6 +365,7 @@ class OPCUA_Client:
 
         self.client.disconnect()
         self.connected = False
+        log.error(f'OPCUA client disconnected from {self.ip}:{self.port}')
 
     def get_nodes(self):
         """
@@ -288,29 +374,27 @@ class OPCUA_Client:
         that it should perform optimizations for reading / writing operations for these nodes.
         """
 
-        self.robot_ns_idx = self.client.get_namespace_index(self.robot_namespace_uri)
+        self.robot_ns_idx = self.client.get_namespace_index(self.robots_namespace_uri)
         self.node_robot = self.client.get_node(f'ns={self.robot_ns_idx};s=Cell.Robots.R32')
-        self.node_robot_busy = self.client.get_node(f'ns={self.robot_ns_idx};s=Cell.Robots.R32.Status.Busy')
-        self.node_robot_position = self.client.get_node(f'ns={self.robot_ns_idx};s=Cell.Robots.R32.Status.Position')
-        self.node_robot_position_valid = self.client.get_node(f'ns={self.robot_ns_idx};s=Cell.Robots.R32.Status.PositionValid')
-        self.node_robot_speed_override = self.client.get_node(f'ns={self.robot_ns_idx};s=Cell.Robots.R32.Status.SpeedOverride')
-        self.node_robot_speed_override_valid = self.client.get_node(f'ns={self.robot_ns_idx};s=Cell.Robots.R32.Status.SpeedOverrideValid')
+        self.node_robot_busy = self.client.get_node(f'ns={self.robot_ns_idx};s=Cell.Robots.R32.Busy')
+        self.node_robot_position = self.client.get_node(f'ns={self.robot_ns_idx};s=Cell.Robots.R32.Position')
+        self.node_robot_position_valid = self.client.get_node(f'ns={self.robot_ns_idx};s=Cell.Robots.R32.PositionValid')
+        self.node_robot_speed_override = self.client.get_node(f'ns={self.robot_ns_idx};s=Cell.Robots.R32.SpeedOverride')
+        self.node_robot_speed_override_valid = self.client.get_node(f'ns={self.robot_ns_idx};s=Cell.Robots.R32.SpeedOverrideValid')
+        self.node_robot_powered_on = self.client.get_node(f'ns={self.robot_ns_idx};s=Cell.Robots.R32.PoweredON')
+        self.node_robot_gripper_active = self.client.get_node(f'ns={self.robot_ns_idx};s=Cell.Robots.R32.GripperActive')
 
-        self.conveyor_ns_idx = self.client.get_namespace_index(self.conveyor_namespace_uri)
-        self.node_conveyor = self.client.get_node(f'ns={self.conveyor_ns_idx};s=Cell.Conveyor')
-        self.node_conveyor_moving = self.client.get_node(f'ns={self.conveyor_ns_idx};s=Cell.Conveyor.Status.Moving')
-        self.node_conveyor_moving_left = self.client.get_node(f'ns={self.conveyor_ns_idx};s=Cell.Conveyor.Status.MovingLeft')
-        self.node_conveyor_moving_right = self.client.get_node(f'ns={self.conveyor_ns_idx};s=Cell.Conveyor.Status.MovingRight')
-        self.node_conveyor_position = self.client.get_node(f'ns={self.conveyor_ns_idx};s=Cell.Conveyor.Status.Position')
-        self.node_conveyor_speed = self.client.get_node(f'ns={self.conveyor_ns_idx};s=Cell.Conveyor.Status.Speed')
+        self.transport_ns_idx = self.client.get_namespace_index(self.transport_namespace_uri)
+        self.node_conveyor = self.client.get_node(f'ns={self.transport_ns_idx};s=Cell.Conveyor')
+        self.node_conveyor_moving = self.client.get_node(f'ns={self.transport_ns_idx};s=Cell.Conveyor.Moving')
+        self.node_conveyor_moving_left = self.client.get_node(f'ns={self.transport_ns_idx};s=Cell.Conveyor.MovingLeft')
+        self.node_conveyor_moving_right = self.client.get_node(f'ns={self.transport_ns_idx};s=Cell.Conveyor.MovingRight')
+        self.node_conveyor_position = self.client.get_node(f'ns={self.transport_ns_idx};s=Cell.Conveyor.Position')
+        self.node_conveyor_speed = self.client.get_node(f'ns={self.transport_ns_idx};s=Cell.Conveyor.Speed')
 
-        self.grippers_ns_idx = self.client.get_namespace_index(self.grippers_namespace_uri)
-        self.node_gripper = self.client.get_node(f'ns={self.grippers_ns_idx};s=Cell.Grippers.G1')
-        self.node_gripper_active = self.client.get_node(f'ns={self.grippers_ns_idx};s=Cell.Grippers.G1.Status.Active')
-
-        self.cell_ns_idx = self.client.get_namespace_index(self.cell_namespace_uri)
-        self.node_emergency_stop_ok = self.client.get_node(f'ns={self.cell_ns_idx};s=Cell.Status.EStopOK')
-        self.node_operator_safety_ok = self.client.get_node(f'ns={self.cell_ns_idx};s=Cell.Status.OperatorSafetyOK')
+        self.workplace_ns_idx = self.client.get_namespace_index(self.workplace_namespace_uri)
+        self.node_emergency_stop_ok = self.client.get_node(f'ns={self.workplace_ns_idx};s=Cell.EStopOK')
+        self.node_operator_safety_ok = self.client.get_node(f'ns={self.workplace_ns_idx};s=Cell.OperatorSafetyOK')
 
         # Register all nodes for faster read / write access.
         # The client.register_nodes() only takes a list of nodes as input, and returns list of
@@ -328,7 +412,7 @@ class OPCUA_Client:
     
     def wait_for_robot(self):
         self.log.info(f'Waiting for robot to finish operation')
-        while self.node_robot_busy.read_value():
+        while self.node_robot_busy.read_value() or not self.node_robot_powered_on.read_value():
             time.sleep(0.1)
 
     def wait_for_operator_safety(self):
@@ -379,73 +463,94 @@ class OPCUA_Client:
             elif result == STATUS.ROBOT_BUSY:
                 self.wait_for_robot()
             elif result == STATUS.OPERATOR_SAFETY_NOT_OK:
-                #self.wait_for_operator_safety()
                 self.log.error(f'Failed to start Pick & Place program: {message}')
-                break
             else:
                 self.log.error(f'Failed to send robot to home position: {message}')
                 break
             time.sleep(0.2)
         return result, message
         
-    def start_pick_place(self, 
+    def start_pick_place(self,
+                         robot_status_dict,
+                         max_pick_distance,
+                         conveyor_init_pos,
                          conveyor_tigger_pos, 
                          start_pos, 
                          pre_pick_pos, 
                          pick_pos, 
                          post_pick_pos, 
-                         place_pos, 
-                         tool_id, 
-                         base_id):
+                         place_pos):
+        assert isinstance(conveyor_init_pos, (int, float))
         assert isinstance(conveyor_tigger_pos, (int, float))
-        assert isinstance(start_pos, list)
-        assert len(start_pos) == 8
-        for coord in start_pos:
-            assert isinstance(coord, (int, float))
-        assert isinstance(pre_pick_pos, list)
-        assert len(pre_pick_pos) == 6
-        for coord in pre_pick_pos:
-            assert isinstance(coord, (int, float))
-        assert isinstance(pick_pos, list)
-        assert len(pick_pos) == 6
-        for coord in pick_pos:
-            assert isinstance(coord, (int, float))
-        assert isinstance(post_pick_pos, list)
-        assert len(post_pick_pos) == 6
-        for coord in post_pick_pos:
-            assert isinstance(coord, (int, float))
-        assert isinstance(place_pos, list)
-        assert len(place_pos) == 8
-        for coord in place_pos:
-            assert isinstance(coord, (int, float))
-        assert isinstance(tool_id, int)
-        assert isinstance(base_id, int)
+        assert isinstance(start_pos, POS6D)
+        assert isinstance(pre_pick_pos, POS6D)
+        assert isinstance(pick_pos, POS6D)
+        assert isinstance(post_pick_pos, POS6D)
+        assert isinstance(place_pos, POS6D)
+
+        init_conveyor_tigger_pos = conveyor_tigger_pos
+        init_start_pos = uatype.POS6D()
+        init_start_pos.__dict__ = start_pos.__dict__
+        init_pre_pick_pos = uatype.POS6D()
+        init_pre_pick_pos.__dict__ = pre_pick_pos.__dict__
+        init_pick_pos = uatype.POS6D()
+        init_pick_pos.__dict__ = pick_pos.__dict__
+        init_post_pick_pos = uatype.POS6D()
+        init_post_pick_pos.__dict__ = post_pick_pos.__dict__
+        init_place_pos = uatype.POS6D()
+        init_place_pos.__dict__ = place_pos.__dict__
+
+        self.log.info('------------PICK-PLACE--------------')
+        self.log.info(f'Conveyor trigger position: {conveyor_tigger_pos}')
+        self.log.info(f'Start position: {start_pos}')
+        self.log.info(f'Pre-Pick position: {pre_pick_pos}')
+        self.log.info(f'Pick position: {pick_pos}')
+        self.log.info(f'Post-Pick position: {post_pick_pos}')
+        self.log.info(f'Place position: {place_pos}')
+        self.log.info('------------------------------------')
 
         self.wait_for_robot()
         while True:
+            # Compute difference between conveyor position when the data was assembled
+            # and current conveyor position
+            conveyor_diff = robot_status_dict['conveyor_position'] - conveyor_init_pos
+            self.log.info(f'Pick Place attempt conveyor difference: {round(conveyor_diff, 2)}')
+
+            # Use the computed difference to offset the position values
+            ua_conveyor_tigger_pos = init_conveyor_tigger_pos + conveyor_diff
+
+            ua_start_pos = init_start_pos
+
+            ua_pre_pick_pos = init_pre_pick_pos
+            ua_pre_pick_pos.X = ua_pre_pick_pos.X + conveyor_diff
+
+            ua_pick_pos = init_pick_pos
+            ua_pick_pos.X = ua_pick_pos.X + conveyor_diff
+
+            ua_post_pick_pos = init_post_pick_pos
+            ua_post_pick_pos.X = ua_post_pick_pos.X + conveyor_diff
+
+            ua_place_pos = init_place_pos
+
+            # Check if the pick position does not excees the bounds of the picking area
+            if ua_post_pick_pos.X > max_pick_distance:
+                result = STATUS.SUCCESS
+                message = 'Did not start the program in time'
+                self.log.error(f'Failed to start Pick & Place program: {message}')
+                break
+
             result, message = self.node_robot.call_method(f'{self.robot_ns_idx}:StartPickPlace',
-                                                          uatype.Variant(conveyor_tigger_pos, uatype.Double),
-                                                          uatype.Variant(start_pos[0:6], uatype.Float), # Coords
-                                                          uatype.Variant(start_pos[6:8], uatype.Byte), # Configuration
-                                                          uatype.Variant(pre_pick_pos, uatype.Float),
-                                                          uatype.Variant(pick_pos, uatype.Float),
-                                                          uatype.Variant(post_pick_pos, uatype.Float),
-                                                          uatype.Variant(place_pos[0:6], uatype.Float), # Coords
-                                                          uatype.Variant(place_pos[6:8], uatype.Byte), # Configuration
-                                                          uatype.Variant(tool_id, uatype.Byte),
-                                                          uatype.Variant(base_id, uatype.Byte))
+                                                          uatype.Variant(ua_conveyor_tigger_pos, uatype.Double),
+                                                          ua_start_pos,
+                                                          ua_pre_pick_pos,
+                                                          ua_pick_pos,
+                                                          ua_post_pick_pos,
+                                                          ua_place_pos)
             if result == STATUS.SUCCESS:
                 self.log.info(f'Started Pick & Place program')
                 break
-            elif result == STATUS.ROBOT_BUSY:
-                self.wait_for_robot()
-            elif result == STATUS.OPERATOR_SAFETY_NOT_OK:
-                #self.wait_for_operator_safety()
-                self.log.error(f'Failed to start Pick & Place program: {message}')
-                break
             else:
                 self.log.error(f'Failed to start Pick & Place program: {message}')
-                break
             time.sleep(0.2)
         return result, message
 
@@ -453,7 +558,7 @@ class OPCUA_Client:
         assert isinstance(move_left, bool)
         assert isinstance(move_right, bool)
 
-        status, message = self.node_conveyor.call_method(f'{self.conveyor_ns_idx}:ConveyorControl', 
+        status, message = self.node_conveyor.call_method(f'{self.transport_ns_idx}:ConveyorControl', 
                                                          uatype.Variant(move_left, uatype.Boolean), 
                                                          uatype.Variant(move_right, uatype.Boolean))
         if status == STATUS.SUCCESS:
@@ -470,7 +575,7 @@ class OPCUA_Client:
     def gripper_control(self, grip: bool):
         assert isinstance(grip, bool)
 
-        status, message = self.node_gripper.call_method(f'{self.grippers_ns_idx}:GripperControl', 
+        status, message = self.node_robot.call_method(f'{self.robot_ns_idx}:GripperControl', 
                                                          uatype.Variant(grip, uatype.Boolean))
         if status == STATUS.SUCCESS:
             if grip:

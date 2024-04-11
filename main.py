@@ -19,12 +19,11 @@ import multiprocessing
 # Third party libraries
 import cv2
 import numpy as np
-#from ultralytics import YOLO
 import ntplib # TODO: implement NTP to get correct time
 
 # Local imports
 from src.item import Item
-from src.opcua_client import ROBOT_COMMAND, status_process_handler, command_process_handler
+from src.opcua_client import ROBOT_COMMAND, POS6D, status_process_handler, command_process_handler, load_opcua_datatypes
 from src.apriltag_homography import ApriltagHomography
 from src.item_tracker import ItemTracker
 from src.camera_socket import CameraSocket
@@ -82,26 +81,23 @@ if __name__ == '__main__':
         
     log.info(f'Loaded program configuration from file: {CONFIG_FILE_PATH}')
 
-    # Read robot positions dictionaries from json file
+    # Read robot positions dictionary from json file
     with open(config.file.robot_positions) as file:
-        robot_poses = json.load(file)["pick_place"]
+        robot_poses = json.load(file)
 
     # Start OPCUA processes for communication with the PLC
     multiprocess_manager = multiprocessing.Manager()
     multiprocess_dict = multiprocess_manager.dict()
     multiprocess_dict['data_valid'] = False
     multiprocess_queue = multiprocessing.Queue(maxsize=100)
-
     status_process = multiprocessing.Process(
         target=status_process_handler,
         args=(config.logging, config.opcua, multiprocess_dict),
     )
-
     command_process = multiprocessing.Process(
         target=command_process_handler,
-        args=(config.logging, config.opcua, multiprocess_queue),
+        args=(config.logging, config.opcua, multiprocess_queue, multiprocess_dict),
     )
-
     status_process.start()
     command_process.start()
 
@@ -141,19 +137,34 @@ if __name__ == '__main__':
         log.warning("No item detector selected")
 
     # Saves the last place position for next cycle
-    last_place_position = None
+    # Initially the last position is set to HOME position
+    last_place_position = POS6D(
+        X = robot_poses['pick_place']['home_pos']['x'],
+        Y = robot_poses['pick_place']['home_pos']['y'],
+        Z = robot_poses['pick_place']['home_pos']['z'],
+        A = robot_poses['pick_place']['home_pos']['a'],
+        B = robot_poses['pick_place']['home_pos']['b'],
+        C = robot_poses['pick_place']['home_pos']['c'],
+        Status = robot_poses['pick_place']['home_pos']['status'],
+        Turn = robot_poses['pick_place']['home_pos']['turn'],
+        ToolFrameID = robot_poses['pick_place']['tool_id'],
+        BaseFrameID = robot_poses['pick_place']['base_id'],
+    )
 
     # Set robot override
-    multiprocess_queue.put(ROBOT_COMMAND(ROBOT_COMMAND.ROBOT_SET_OVERRIDE, 10))
+    multiprocess_queue.put(ROBOT_COMMAND(ROBOT_COMMAND.ROBOT_SET_OVERRIDE, config.pick_place.speed_override))
 
     # Send robot to home position
     multiprocess_queue.put(ROBOT_COMMAND(ROBOT_COMMAND.ROBOT_GO_TO_HOME))
 
     # Disable gripper
-    #multiprocess_queue.put(ROBOT_COMMAND(ROBOT_COMMAND.GRIPPER_TOGGLE, False))
+    multiprocess_queue.put(ROBOT_COMMAND(ROBOT_COMMAND.GRIPPER_TOGGLE, False))
 
     # Start conveyor
     #multiprocess_queue.put(ROBOT_COMMAND(ROBOT_COMMAND.CONVEYOR_TOGGLE, [True, False]))
+
+    # Program variables
+    operator_safety_triggered = False # Used to detect rising edge of the operator safety signal
 
     while True:
         # Start timer for FPS estimation
@@ -183,6 +194,14 @@ if __name__ == '__main__':
         if not is_emergency_stop_ok:
             log.error(f'Emergency Stop is active, exiting')
             break
+
+        if not is_operator_safety_ok:
+            operator_safety_triggered = True
+
+        # If operator safety was acknowledged, send robot to home position
+        if operator_safety_triggered and is_operator_safety_ok:
+            multiprocess_queue.put(ROBOT_COMMAND(ROBOT_COMMAND.ROBOT_GO_TO_HOME))
+            operator_safety_triggered = False
 
         # Get frames from camera
         image_timestamp, depth_image, rgb_image = camera_client.recv_camera_image()
@@ -241,8 +260,8 @@ if __name__ == '__main__':
                 image_frame=display_rgb_image,
             )
             for packet in detected_item_list:
-                packet.width = packet.width * frame_width
-                packet.height = packet.height * frame_height
+                packet.width_px = packet.width_px * frame_width
+                packet.width_px = packet.width_px * frame_height
 
         # Detect packets using neural network
         elif config.detector.type == 'NN2':
@@ -279,7 +298,7 @@ if __name__ == '__main__':
         # Disable detection during safe operational stop
         # This is to allow packet placement in front of camera
         # without detection glitches from hand movement
-        if is_operator_safety_ok:
+        if not is_operator_safety_ok:
             detected_item_list = []
 
         # ITEM TRACKING
@@ -295,93 +314,106 @@ if __name__ == '__main__':
         if config.tracking.show_tracked_items:
             display_rgb_image = item_tracker.draw_tracked_items(display_rgb_image,
                                                                 conveyor_position_mm,
+                                                                homography_matrix,
                                                                 config.graphics.text_size)
 
         # ROBOT CONTROL
         ###############
             
+        # Fallback
         # Remove items which are beyond safe picking distance from the list
         for item in tracked_item_list:
-            if item.get_centroid_from_encoder_in_mm(conveyor_position_mm).x >= config.pick_place.max_pick_distance:
-                del item
+            if item.get_centroid_from_encoder_in_mm(conveyor_position_mm, homography_matrix).x >= config.pick_place.max_pick_distance:
+                tracked_item_list.remove(item)
         
-        # If robot is not busy picking a packet
-        if not multiprocess_dict['robot_busy']:
-            # Get first item which is ready to be sorted
-            for item in tracked_item_list:
-                if (not item.being_picked
-                    and item.get_centroid_from_encoder_in_mm(conveyor_position_mm).x >= config.pick_place.min_pick_distance):
+        # Get first item which is ready to be sorted
+        for item in tracked_item_list:
+            if (
+                not item.processed
+                and item.get_centroid_from_encoder_in_mm(conveyor_position_mm, homography_matrix).x >= config.pick_place.min_pick_distance
+            ):
+                
+                item.processed = True
 
-                    item.being_picked = True
+                trigger_position = conveyor_position_mm + config.pick_place.moveahead_distance
 
-                    trigger_position = multiprocess_dict['conveyor_position'] + config.pick_place.moveahead_distance
+                start_pos = last_place_position
 
-                    if last_place_position is None:
-                        start_pos = [
-                            robot_poses['pick_place']['home']['x'],
-                            robot_poses['pick_place']['home']['y'],
-                            robot_poses['pick_place']['home']['z'],
-                            robot_poses['pick_place']['home']['a'],
-                            robot_poses['pick_place']['home']['b'],
-                            robot_poses['pick_place']['home']['c'],
-                            robot_poses['pick_place']['home']['status'],
-                            robot_poses['pick_place']['home']['turn'],
+                pre_pick_pos = POS6D(
+                    X = item.get_centroid_from_encoder_in_mm(conveyor_position_mm, homography_matrix).x + config.pick_place.moveahead_distance,
+                    Y = item.get_centroid_from_encoder_in_mm(conveyor_position_mm, homography_matrix).y,
+                    Z = config.pick_place.z_offset,
+                    A = -90.0,
+                    B = 0.0,
+                    C = -180.0,
+                    Status = 0,
+                    Turn = 0,
+                    ToolFrameID = robot_poses['pick_place']['tool_id'],
+                    BaseFrameID = robot_poses['pick_place']['base_id'],
+                )
+
+                pick_pos = POS6D(
+                    X = pre_pick_pos.X + config.pick_place.pick_movement_x_distance,
+                    Y = item.get_centroid_from_encoder_in_mm(conveyor_position_mm, homography_matrix).y,
+                    Z = 10,
+                    A = -90.0,
+                    B = 0.0,
+                    C = -180.0,
+                    Status = 0,
+                    Turn = 0,
+                    ToolFrameID = robot_poses['pick_place']['tool_id'],
+                    BaseFrameID = robot_poses['pick_place']['base_id'],
+                )
+
+                post_pick_pos = POS6D(
+                    X = pick_pos.X + config.pick_place.pick_movement_x_distance,
+                    Y = item.get_centroid_from_encoder_in_mm(conveyor_position_mm, homography_matrix).y,
+                    Z = config.pick_place.z_offset,
+                    A = -90.0,
+                    B = 0.0,
+                    C = -180.0,
+                    Status = 0,
+                    Turn = 0,
+                    ToolFrameID = robot_poses['pick_place']['tool_id'],
+                    BaseFrameID = robot_poses['pick_place']['base_id'],
+                )
+
+                place_pos = POS6D(
+                    X = robot_poses['pick_place']['place_pos_list'][0]['x'],
+                    Y = robot_poses['pick_place']['place_pos_list'][0]['y'],
+                    Z = robot_poses['pick_place']['place_pos_list'][0]['z'],
+                    A = robot_poses['pick_place']['place_pos_list'][0]['a'],
+                    B = robot_poses['pick_place']['place_pos_list'][0]['b'],
+                    C = robot_poses['pick_place']['place_pos_list'][0]['c'],
+                    Status = robot_poses['pick_place']['place_pos_list'][0]['status'],
+                    Turn = robot_poses['pick_place']['place_pos_list'][0]['turn'],
+                    ToolFrameID = robot_poses['pick_place']['tool_id'],
+                    BaseFrameID = robot_poses['pick_place']['base_id'],
+                )
+
+                last_place_position = place_pos
+
+                multiprocess_queue.put(
+                    ROBOT_COMMAND(
+                        ROBOT_COMMAND.ROBOT_START_PICK_PLACE, 
+                        [
+                            config.pick_place.max_pick_distance,
+                            conveyor_position_mm,
+                            trigger_position,
+                            start_pos,
+                            pre_pick_pos,
+                            pick_pos,
+                            post_pick_pos,
+                            place_pos,
                         ]
-                    else:
-                        start_pos = last_place_position
+                    )
+                )
+                log.info(f'Sent Pick Place start request for item with ID {item.id}')
 
-                    pre_pick_pos = [
-                        item.get_centroid_from_encoder_in_mm(conveyor_position_mm).x + config.pick_place.moveahead_distance, # X
-                        item.get_centroid_from_encoder_in_mm(conveyor_position_mm).y, # Y
-                        config.pick_place.z_offset, # Z
-                        90.0,
-                        0.0,
-                        -180.0
-                    ]
-
-                    pick_pos = [
-                        pre_pick_pos[0] + config.pick_place.pick_movement_x_distance, # X
-                        item.get_centroid_from_encoder_in_mm(conveyor_position_mm).y, # Y
-                        30, # Z
-                        90.0,
-                        0.0,
-                        -180.0
-                    ]
-
-                    post_pick_pos = [
-                        pick_pos[0] + config.pick_place.pick_movement_x_distance, # X
-                        item.get_centroid_from_encoder_in_mm().y, # Y
-                        config.pick_place.z_offset, # Z
-                        90.0,
-                        0.0,
-                        -180.0
-                    ]
-
-                    place_pos = [
-                        robot_poses['pick_place']['place_pos_list'][0]['x'],
-                        robot_poses['pick_place']['place_pos_list'][0]['y'],
-                        robot_poses['pick_place']['place_pos_list'][0]['z'],
-                        robot_poses['pick_place']['place_pos_list'][0]['a'],
-                        robot_poses['pick_place']['place_pos_list'][0]['b'],
-                        robot_poses['pick_place']['place_pos_list'][0]['c'],
-                        robot_poses['pick_place']['place_pos_list'][0]['status'],
-                        robot_poses['pick_place']['place_pos_list'][0]['turn'],
-                    ]
-                    last_place_position = place_pos
-
-                    multiprocess_queue.put(ROBOT_COMMAND(ROBOT_COMMAND.ROBOT_START_PICK_PLACE, 
-                                                        [
-                                                            trigger_position,
-                                                            start_pos,
-                                                            pre_pick_pos,
-                                                            pick_pos,
-                                                            post_pick_pos,
-                                                            place_pos,
-                                                            robot_poses['pick_place']['tool_id'],
-                                                            robot_poses['pick_place']['base_id']
-                                                        ]))
-
-                    break
+        # Remove processed items from tracked list
+        for item in tracked_item_list:
+            if item.processed:
+                tracked_item_list.remove(item)
 
         # OTHER FRAME GRAPHICS
         ######################
