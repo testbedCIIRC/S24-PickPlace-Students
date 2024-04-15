@@ -5,7 +5,7 @@ level_char_length = 8 # How many characters should the 'level' field have in the
 
 [pick_place]
 robot_positions_file = "./config/robot_positions.json"
-speed_override = 3
+speed_override = 100
 min_pick_distance = 800
 max_pick_distance = 1800
 moveahead_distance = 180 # How far the robot will move ahead of the item to wait for it
