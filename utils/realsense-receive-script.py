@@ -19,6 +19,10 @@ if __name__ == "__main__":
     cam = RemoteCamera()
     cam.connect(SERVER_IP, SERVER_PORT)
 
+    record_video = "--rec" in sys.argv 
+    if record_video:
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        vid = cv2.VideoWriter(f"video_{int(time.time())}.mp4", fourcc, 10.0, (1280,720))
     capture_pos = "-p" in sys.argv
     if capture_pos:
         csv = open(f"positions_{int(time.time())}.csv", "w")
@@ -58,7 +62,10 @@ if __name__ == "__main__":
         image_frame = cv2.putText(image_frame, text_delay, (50, 120), cv2.FONT_HERSHEY_SIMPLEX, text_size, (0, 0, 0), 6, cv2.LINE_AA)
         image_frame = cv2.putText(image_frame, text_delay, (50, 120), cv2.FONT_HERSHEY_SIMPLEX, text_size, (255, 255, 255), 2, cv2.LINE_AA)
         #image_frame = cv2.resize(image_frame, (frame_width//2, frame_height//2))
+
         cv2.imshow("Frame", image_frame)
+        if record_video:
+            vid.write(frame_rgb)
 
         key = cv2.waitKey(1)
         if key == 27: # Esc
@@ -67,6 +74,8 @@ if __name__ == "__main__":
             if capture_pos:
                 rob.disconnect()
                 csv.close()
+            if record_video:
+                vid.release()
             break
         elif key == ord('s'):
             img_name = f'frame_{frame_timestamp}.png'
