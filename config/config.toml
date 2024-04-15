@@ -1,15 +1,22 @@
-[file]
-robot_positions = "./config/robot_positions.json"
-apriltag_points = "./config/conveyor_points.json"
-
 [logging]
-# Valid values are "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"
-level = "INFO"
+level = "INFO" # Valid values are "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"
+name_char_length = 15 # How many characters should the 'name' field have in the log
+level_char_length = 8 # How many characters should the 'level' field have in the log
 
-[graphics]
-text_size = 1
-show_depth_map = false
-show_fps = true
+[pick_place]
+robot_positions_file = "./config/robot_positions.json"
+speed_override = 3
+min_pick_distance = 800
+max_pick_distance = 1800
+moveahead_distance = 180 # How far the robot will move ahead of the item to wait for it
+z_height_min = 10 # Minimum height for robot picking movement in conveyor belt coordinates
+z_height = 150 # How high up will the robot be moving the items
+pick_movement_x_distance = 100 # X distance between pre-pick and pick positions
+
+[tracking]
+frames_to_deregister = 100
+max_item_distance = 400 # Maximal distance which packet can travel when it disappears in frame pixels
+show_tracked_items = true
 
 [camera]
 ip = "10.100.0.129"
@@ -25,12 +32,22 @@ robots_namespace_uri = "http://robots.ti40.cz"
 transport_namespace_uri = "http://transportation.ti40.cz"
 
 [homography]
+base_camera_depth = 800 # Max distance from depth camera in millimeters
+base_camera_depth_offset = 0 # Used to account for difference between tag placement height and conveyor belt surface, positive numbers are tags above the belt
 frames_per_update = 100
+apriltag_points_file = "./config/conveyor_points.json"
+
+[graphics]
+text_size = 1
+show_depth_map = false
+show_info = true
 
 [detector]
-type = "HSV" # Valid values are "HSV", "NN1", "NN2", "NN3"
+type = "HSV" # Valid values are "HSV", "YOLOv8_material", "YOLOv8_object"
 
 [detector.hsv]
+show_detections = true
+show_hsv_mask = false
 ignore_vertical_px = 133
 ignore_horizontal_px = 50
 max_ratio_error = 0.5
@@ -38,24 +55,10 @@ white_lower = [60, 0, 85]
 white_upper = [179, 255, 255]
 brown_lower = [0, 33, 57]
 brown_upper = [60, 255, 178]
-show_hsv_mask = false
+
+[detector.YOLOv8_material]
 show_detections = true
+# TODO: Add detector parameters here
 
-[detector.nn1]
-
-[detection.nn2]
-
-[tracking]
-min_frames = 30 # 
-frames_to_deregister = 100
-max_item_distance = 400 # Maximal distance which packet can travel when it disappears in frame pixels
-show_tracked_items = true
-
-[pick_place]
-speed_override = 100
-packet_depths = [ 7.0, 5.0, 5.0, 5.0 ]
-min_pick_distance = 800
-max_pick_distance = 1800
-moveahead_distance = 180 # How far the robot will move ahead of the item to wait for it
-z_offset = 150 # How high up will the robot be moving the items
-pick_movement_x_distance = 100 # X distance between pre-pick and pick positions
+[detector.YOLOv8_object]
+show_detections = true

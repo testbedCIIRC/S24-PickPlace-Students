@@ -2,19 +2,29 @@
 import logging
 import time
 import multiprocessing
+import copy
 
 # External imports
 import asyncua.sync as opcua
 import asyncua.ua as uatype
 
+# Local imports
+from src.logging_setup import setup_logging
+
 
 # OPCUA Method Status codes
 class STATUS():
     SUCCESS = 0
-    ROBOT_NOT_HOMED = 2000
-    ROBOT_BUSY = 2000
-    EMERGENCY_STOP_NOT_OK = 2000
-    OPERATOR_SAFETY_NOT_OK = 2000
+    INTERNAL_ERROR = 1
+    INVALID_PARAMETERS = 2
+    TIMEOUT = 3
+    EMERGENCY_STOP_NOT_OK = 100
+    OPERATOR_SAFETY_NOT_OK = 101
+    TOTAL_SAFETY_NOT_OK = 102
+    ROBOT_BUSY = 1000
+    ROBOT_COMMUNICATION_ERROR = 1001
+    ROBOT_NOT_POWERED_ON = 1002
+    ROBOT_NOT_HOMED = 1003
 
 
 # Class for passing commands to the command process
@@ -85,26 +95,25 @@ class POS6D():
             f'ToolFrameID={self.ToolFrameID}, ' +
             f'BaseFrameID={self.BaseFrameID})')
 
-# Setup logging
-log = logging.getLogger('PickPlace-Logger')
-
 
 def status_process_handler(logging_config,
-                           config,
-                           multiprocess_dict):
+                           opcua_config,
+                           shutdown_event,
+                           cell_status_dict):
     """
-    Process to read values from PLC server.
+    Process to read values from the PLC OPCUA server.
     Periodically reads robot info from PLC and writes it into 'manag_info_dict', and 'manag_encoder_val.value'
     which is a dictionary read at the same time in the main process.
     """
+    # Setup logging
+    # Must happen before any logging function call
+    log = setup_logging('OPCUA-STATUS', logging_config)
 
     # Connect server and get nodes
-    opcua_client = OPCUA_Client(logging_config, config)
+    opcua_client = OPCUA_Client(logging_config, opcua_config)
     opcua_client.connect()
     if not opcua_client.connected:
         return
-    
-    opcua_client.get_nodes()
 
     # Define list of nodes read by this server
     node_list = [
@@ -117,38 +126,29 @@ def status_process_handler(logging_config,
         opcua_client.node_conveyor_speed,
         opcua_client.node_robot_gripper_active,
         opcua_client.node_emergency_stop_ok,
-        opcua_client.node_operator_safety_ok
+        opcua_client.node_operator_safety_ok,
+        opcua_client.node_robot_powered_on
     ]
 
     # Initial disctionary values passed between processes
-    robot_position = {'X': 0.0,
-                      'Y': 0.0,
-                      'Z': 0.0,
-                      'A': 0.0,
-                      'B': 0.0,
-                      'C': 0.0,
-                      'Status': 0,
-                      'Turn': 0,
-                      'ToolFrameID': 0,
-                      'BaseFrameID': 0}
-    multiprocess_dict['robot_position'] = robot_position
-    multiprocess_dict['robot_busy'] = False
-    multiprocess_dict['conveyor_moving'] = False
-    multiprocess_dict['conveyor_moving_left'] = False
-    multiprocess_dict['conveyor_moving_right'] = False
-    multiprocess_dict['conveyor_position'] = 0.0
-    multiprocess_dict['conveyor_speed'] = 0.0
-    multiprocess_dict['gripper_active'] = False
-    multiprocess_dict['emergency_stop_ok'] = False
-    multiprocess_dict['operator_safety_ok'] = False
-    multiprocess_dict['data_valid'] = False
-    multiprocess_dict['exit'] = False
+    cell_status_dict['robot_position'] = POS6D()
+    cell_status_dict['robot_busy'] = False
+    cell_status_dict['conveyor_moving'] = False
+    cell_status_dict['conveyor_moving_left'] = False
+    cell_status_dict['conveyor_moving_right'] = False
+    cell_status_dict['conveyor_position'] = 0.0
+    cell_status_dict['conveyor_speed'] = 0.0
+    cell_status_dict['gripper_active'] = False
+    cell_status_dict['emergency_stop_ok'] = False
+    cell_status_dict['operator_safety_ok'] = False
+    cell_status_dict['robot_powered_on'] = False
+    cell_status_dict['data_valid'] = False
 
     # Read values from server forever
     while True:
         try:
-            if multiprocess_dict['exit']:
-                opcua_client.log.info(f'OPCUA Status client received EXIT command, disconnecting')
+            if shutdown_event.is_set():
+                log.info(f'OPCUA Status client received EXIT command, disconnecting')
                 break
 
             # Get values from defined nodes
@@ -156,81 +156,155 @@ def status_process_handler(logging_config,
             value_list = opcua_client.read_values(node_list)
 
             # Assign values from returned list to variables
-            robot_position['X'] = value_list[0].X
-            robot_position['Y'] = value_list[0].Y
-            robot_position['Z'] = value_list[0].Z
-            robot_position['A'] = value_list[0].A
-            robot_position['B'] = value_list[0].B
-            robot_position['C'] = value_list[0].C
-            robot_position['Status'] = value_list[0].Status
-            robot_position['Turn'] = value_list[0].Turn
-            robot_position['ToolFrameID'] = value_list[0].ToolFrameID
-            robot_position['BaseFrameID'] = value_list[0].BaseFrameID
-            multiprocess_dict['robot_position'] = robot_position
-            multiprocess_dict['robot_busy'] = value_list[1]
-            multiprocess_dict['conveyor_moving'] = value_list[2]
-            multiprocess_dict['conveyor_moving_left'] = value_list[3]
-            multiprocess_dict['conveyor_moving_right'] = value_list[4]
-            multiprocess_dict['conveyor_position'] = round(value_list[5], 2)
-            multiprocess_dict['conveyor_speed'] = round(value_list[6], 2)
-            multiprocess_dict['gripper_active'] = value_list[7]
-            multiprocess_dict['emergency_stop_ok'] = value_list[8]
-            multiprocess_dict['operator_safety_ok'] = value_list[9]
-            multiprocess_dict['data_valid'] = True
+            cell_status_dict['robot_position'].__dict__ = value_list[0].__dict__
+            cell_status_dict['robot_busy'] = value_list[1]
+            cell_status_dict['conveyor_moving'] = value_list[2]
+            cell_status_dict['conveyor_moving_left'] = value_list[3]
+            cell_status_dict['conveyor_moving_right'] = value_list[4]
+            cell_status_dict['conveyor_position'] = round(value_list[5], 2)
+            cell_status_dict['conveyor_speed'] = round(value_list[6], 2)
+            cell_status_dict['gripper_active'] = value_list[7]
+            cell_status_dict['emergency_stop_ok'] = value_list[8]
+            cell_status_dict['operator_safety_ok'] = value_list[9]
+            cell_status_dict['robot_powered_on'] = value_list[10]
+            cell_status_dict['data_valid'] = True
 
         except Exception as e:
-            opcua_client.log.error(f'OPCUA Status client disconnected: {e}')
+            log.error(f'OPCUA Status client disconnected: {e}')
             break
 
-    multiprocess_dict['data_valid'] = False
+    cell_status_dict['data_valid'] = False
+    shutdown_event.set()
     opcua_client.disconnect()
 
 
 def command_process_handler(logging_config,
-                            config,
-                            multiprocess_queue: multiprocessing.Queue,
-                            multiprocess_dict):
+                            opcua_config,
+                            shutdown_event,
+                            abort_commands_event,
+                            cell_command_queue,
+                            cell_status_dict):
     """
-    Process to control teh cell using OPCUA methods
+    Process to control the cell using OPCUA methods
     """
+    # Setup logging
+    # Must happen before any logging function call
+    log = setup_logging('OPCUA-COMMAND', logging_config)
+
     # Connect server and get nodes
-    opcua_client = OPCUA_Client(logging_config, config)
+    opcua_client = OPCUA_Client(logging_config, opcua_config)
     opcua_client.connect()
     if not opcua_client.connected:
         return
 
-    opcua_client.get_nodes()
-
-    while not multiprocess_dict['data_valid']:
+    while not cell_status_dict['data_valid']:
         pass
 
     while True:
         try:
-            command = multiprocess_queue.get()
+            if shutdown_event.is_set():
+                log.info(f'OPCUA Command client received EXIT command, disconnecting')
+                break
+
+            if abort_commands_event.is_set():
+                while not cell_command_queue.empty():
+                    cell_command_queue.get()
+                abort_commands_event.clear()
+
+            command = cell_command_queue.get()
             assert isinstance(command, ROBOT_COMMAND)
 
             command_type = command.type
             command_data = command.data
 
             if command_type == ROBOT_COMMAND.ROBOT_SET_OVERRIDE:
-                opcua_client.set_robot_speed_override(command_data)
+                log.info(f'Set Override method call')
+                while True:
+                    result, message = opcua_client.set_robot_speed_override(command_data)
+                    if result == STATUS.SUCCESS or shutdown_event.is_set() or abort_commands_event.is_set():
+                        break
+                    time.sleep(0.2)
 
             elif command_type == ROBOT_COMMAND.ROBOT_SET_FRAMES:
-                opcua_client.set_robot_frame(command_data[0], command_data[1])
+                log.info(f'Set Frames method call')
+                while True:
+                    result, message = opcua_client.set_robot_frame(command_data[0], command_data[1])
+                    if result == STATUS.SUCCESS or shutdown_event.is_set() or abort_commands_event.is_set():
+                        break
+                    time.sleep(0.2)
 
             elif command_type == ROBOT_COMMAND.ROBOT_GO_TO_HOME:
-                opcua_client.start_move_to_home()
+                log.info(f'Move To Home method call')
+                while True:
+                    result, message = opcua_client.start_move_to_home()
+                    if result == STATUS.SUCCESS or shutdown_event.is_set() or abort_commands_event.is_set():
+                        break
+                    time.sleep(0.2)
 
             elif command_type == ROBOT_COMMAND.ROBOT_START_PICK_PLACE:
-                opcua_client.start_pick_place(multiprocess_dict,
-                                              command_data[0], # Max Pick distance
-                                              command_data[1], # Conveyor Intial position
-                                              command_data[2], # Conveyor Trigger position
-                                              command_data[3], # Start pos
-                                              command_data[4], # Pre Pick pos
-                                              command_data[5], # Pick pos
-                                              command_data[6], # Post Pick pos
-                                              command_data[7]) # Place pos
+                log.debug(f'Pick Place method call')
+                max_pick_distance = command_data[0]
+                conveyor_init_pos = command_data[1]
+
+                conveyor_tigger_pos = command_data[2]
+                start_pos = command_data[3]
+                pre_pick_pos = command_data[4]
+                pick_pos = command_data[5]
+                post_pick_pos = command_data[6]
+                place_pos = command_data[7]
+
+                new_conveyor_tigger_pos = copy.deepcopy(command_data[2])
+                new_start_pos = copy.deepcopy(command_data[3])
+                new_pre_pick_pos = copy.deepcopy(command_data[4])
+                new_pick_pos = copy.deepcopy(command_data[5])
+                new_post_pick_pos = copy.deepcopy(command_data[6])
+                new_place_pos = copy.deepcopy(command_data[7])
+
+                while True:
+                    # Compute difference between conveyor position when the data was assembled
+                    # and current conveyor position
+                    conveyor_diff = cell_status_dict['conveyor_position'] - conveyor_init_pos
+
+                    # Use the computed difference to offset the position values
+                    new_conveyor_tigger_pos = conveyor_tigger_pos + conveyor_diff
+
+                    new_start_pos = start_pos
+
+                    new_pre_pick_pos.X = pre_pick_pos.X + conveyor_diff
+                    new_pick_pos.X = pick_pos.X + conveyor_diff
+                    new_post_pick_pos.X = post_pick_pos.X + conveyor_diff
+
+                    new_place_pos = place_pos
+
+                    log.debug('------------PICK-PLACE--------------')
+                    log.debug(f'Conveyor difference: {conveyor_diff}')
+                    log.debug(f'Conveyor trigger position: {conveyor_tigger_pos}')
+                    log.debug(f'Start position: {start_pos}')
+                    log.debug(f'Pre-Pick position: {pre_pick_pos}')
+                    log.debug(f'Pick position: {pick_pos}')
+                    log.debug(f'Post-Pick position: {post_pick_pos}')
+                    log.debug(f'Place position: {place_pos}')
+                    log.debug('------------------------------------')
+
+                    # Check if the pick position does not excees the bounds of the picking area
+                    if new_post_pick_pos.X > max_pick_distance:
+                        log.warning(f'Missed item')
+                        break
+
+                    log.debug(f'Pick Place attempt with conveyor difference from initial value: {round(conveyor_diff, 2)}')
+                    result, message = opcua_client.start_pick_place(
+                        new_conveyor_tigger_pos,
+                        new_start_pos,
+                        new_pre_pick_pos,
+                        new_pick_pos,
+                        new_post_pick_pos,
+                        new_place_pos,
+                    )
+
+                    if result == STATUS.SUCCESS or shutdown_event.is_set() or abort_commands_event.is_set():
+                        break
+
+                    time.sleep(0.2)
 
             elif command_type == ROBOT_COMMAND.CONVEYOR_TOGGLE:
                 opcua_client.conveyor_control(command_data[0], command_data[1])
@@ -238,23 +312,20 @@ def command_process_handler(logging_config,
             elif command_type == ROBOT_COMMAND.GRIPPER_TOGGLE:
                 opcua_client.gripper_control(command_data)
 
-            elif command_type == ROBOT_COMMAND.EXIT:
-                opcua_client.log.info(f'OPCUA Command client received EXIT command, disconnecting')
-                break
-
             else:
-                opcua_client.log.warning(f'Wrong command sent to control server: {command_type}')
+                log.warning(f'Wrong command sent to control server: {command_type}')
 
         except Exception as e:
-            opcua_client.log.error(f'OPCUA Command client disconnected: {e}')
+            log.error(f'OPCUA Command client disconnected: {e}')
             break
     
+    shutdown_event.set()
     opcua_client.disconnect()
 
 
 # Load OPCUA data type definitions in the main process
 # Types loaded in separate processes are not accesible in the calling program
-def load_opcua_datatypes(opcua_config):
+def load_opcua_datatypes(logging_config, opcua_config):
     assert isinstance(opcua_config.ip, str)
     assert isinstance(opcua_config.port, int)
     assert isinstance(opcua_config.username, str)
@@ -264,6 +335,10 @@ def load_opcua_datatypes(opcua_config):
     port = opcua_config.port
     username = opcua_config.username
     password = opcua_config.password
+
+    # Setup logging
+    # Must happen before any logging function call
+    log = setup_logging('OPCUA', logging_config)
 
     if username and password:
         client = opcua.Client(f'opc.tcp://{username}:{password}@{ip}:{port}/')
@@ -296,6 +371,11 @@ class OPCUA_Client:
         assert isinstance(opcua_config.robots_namespace_uri, str)
         assert isinstance(opcua_config.transport_namespace_uri, str)
 
+        # Setup logging
+        # Must happen before any logging function call
+        self.log = setup_logging('OPCUA', logging_config)
+        logging.getLogger().setLevel(logging.CRITICAL)
+
         self.ip = opcua_config.ip
         self.port = opcua_config.port
         self.username = opcua_config.username
@@ -309,33 +389,6 @@ class OPCUA_Client:
         self.timeout = 4  # Every request expects answer in this time (in seconds)
         self.secure_channel_timeout = 300_000  # Timeout for the secure channel (in milliseconds), it should be equal to the timeout set on the PLC
         self.session_timeout = 30_000  # Timeout for the session (in milliseconds), it should be equal to the timeout set on the PLC
-
-        # Setup logging
-        logging.root.setLevel(logging.CRITICAL)
-        self.log = logging.getLogger('PickPlace-Logger')
-        hdl = logging.StreamHandler()
-        if logging_config.level == 'DEBUG':
-            self.log.setLevel(logging.DEBUG)
-            hdl.setLevel(logging.DEBUG)
-        elif logging_config.level == 'INFO':
-            self.log.setLevel(logging.INFO)
-            hdl.setLevel(logging.INFO)
-        elif logging_config.level == 'WARNING':
-            self.log.setLevel(logging.WARNING)
-            hdl.setLevel(logging.WARNING)
-        elif logging_config.level == 'ERROR':
-            self.log.setLevel(logging.ERROR)
-            hdl.setLevel(logging.ERROR)
-        elif logging_config.level == 'CRITICAL':
-            self.log.setLevel(logging.CRITICAL)
-            hdl.setLevel(logging.CRITICAL)
-        else:
-            self.log.setLevel(logging.WARNING)
-            hdl.setLevel(logging.WARNING)
-        log_formatter = logging.Formatter(fmt='[%(asctime)s] [%(levelname)s] - %(message)s',
-                                          datefmt='%Y-%m-%d %H:%M:%S')
-        hdl.setFormatter(log_formatter)
-        self.log.addHandler(hdl)
 
     def connect(self):
         """
@@ -352,11 +405,12 @@ class OPCUA_Client:
         try:
             self.client.connect()
             self.client.load_data_type_definitions()
+            self.get_nodes()
             self.connected = True
-            log.info(f'OPCUA client connected to server at {self.ip}:{self.port}')
+            self.log.info(f'OPCUA client connected to server at {self.ip}:{self.port}')
         except Exception as e:
             self.connected = False
-            log.error(f'OPCUA client failed to connect to server at {self.ip}:{self.port}: {e}')
+            self.log.critical(f'OPCUA client failed to connect to server at {self.ip}:{self.port}: {e}')
 
     def disconnect(self):
         """
@@ -365,7 +419,7 @@ class OPCUA_Client:
 
         self.client.disconnect()
         self.connected = False
-        log.error(f'OPCUA client disconnected from {self.ip}:{self.port}')
+        self.log.info(f'OPCUA client disconnected from {self.ip}:{self.port}')
 
     def get_nodes(self):
         """
@@ -423,8 +477,10 @@ class OPCUA_Client:
     def set_robot_speed_override(self, speed_override: int):
         assert isinstance(speed_override, int)
 
-        result, message = self.node_robot.call_method(f'{self.robot_ns_idx}:SetOverride',
-                                                      uatype.Variant(speed_override, uatype.Byte))
+        result, message = self.node_robot.call_method(
+            f'{self.robot_ns_idx}:SetOverride',
+            uatype.Variant(speed_override, uatype.Byte)
+        )
         if result == STATUS.SUCCESS:
             self.log.info(f'Set robot speed override to {speed_override} %')
         else:
@@ -435,52 +491,38 @@ class OPCUA_Client:
         assert isinstance(tool_id, int)
         assert isinstance(base_id, int)
 
-        while True:
-            result, message = self.node_robot.call_method(f'{self.robot_ns_idx}:SetFrames',
-                                                        uatype.Variant(tool_id, uatype.Byte),
-                                                        uatype.Variant(base_id, uatype.Byte))
-            if result == STATUS.SUCCESS:
-                self.log.info(f'Set robot Tool ID to {tool_id} and Base ID to {base_id}')
-                break
-            elif result == STATUS.ROBOT_BUSY:
-                self.wait_for_robot()
-            elif result == STATUS.OPERATOR_SAFETY_NOT_OK:
-                #self.wait_for_operator_safety()
-                self.log.error(f'Failed to start Pick & Place program: {message}')
-                break
-            else:
-                self.log.error(f'Failed to set robot Tool and Base IDs: {message}')
-                break
+        result, message = self.node_robot.call_method(
+            f'{self.robot_ns_idx}:SetFrames',
+            uatype.Variant(tool_id, uatype.Byte),
+            uatype.Variant(base_id, uatype.Byte)
+        )
+        if result == STATUS.SUCCESS:
+            self.log.info(f'Set robot Tool ID to {tool_id} and Base ID to {base_id}')
+        elif result == STATUS.ROBOT_BUSY:
+            pass
+        else:
+            self.log.error(f'Failed to set robot Tool and Base IDs: {message}')
         return result, message
     
     def start_move_to_home(self):
-        self.wait_for_robot()
-        while True:
-            result, message = self.node_robot.call_method(f'{self.robot_ns_idx}:StartMoveToHome')
-            if result == STATUS.SUCCESS:
-                self.log.info(f'Sent robot to home position')
-                break
-            elif result == STATUS.ROBOT_BUSY:
-                self.wait_for_robot()
-            elif result == STATUS.OPERATOR_SAFETY_NOT_OK:
-                self.log.error(f'Failed to start Pick & Place program: {message}')
-            else:
-                self.log.error(f'Failed to send robot to home position: {message}')
-                break
-            time.sleep(0.2)
+        result, message = self.node_robot.call_method(
+            f'{self.robot_ns_idx}:StartMoveToHome'
+        )
+        if result == STATUS.SUCCESS:
+            self.log.info(f'Sent robot to home position')
+        elif result == STATUS.ROBOT_BUSY:
+            pass
+        else:
+            self.log.error(f'Failed to send robot to home position: {message}')
         return result, message
         
     def start_pick_place(self,
-                         robot_status_dict,
-                         max_pick_distance,
-                         conveyor_init_pos,
                          conveyor_tigger_pos, 
                          start_pos, 
                          pre_pick_pos, 
                          pick_pos, 
                          post_pick_pos, 
                          place_pos):
-        assert isinstance(conveyor_init_pos, (int, float))
         assert isinstance(conveyor_tigger_pos, (int, float))
         assert isinstance(start_pos, POS6D)
         assert isinstance(pre_pick_pos, POS6D)
@@ -488,79 +530,44 @@ class OPCUA_Client:
         assert isinstance(post_pick_pos, POS6D)
         assert isinstance(place_pos, POS6D)
 
-        init_conveyor_tigger_pos = conveyor_tigger_pos
-        init_start_pos = uatype.POS6D()
-        init_start_pos.__dict__ = start_pos.__dict__
-        init_pre_pick_pos = uatype.POS6D()
-        init_pre_pick_pos.__dict__ = pre_pick_pos.__dict__
-        init_pick_pos = uatype.POS6D()
-        init_pick_pos.__dict__ = pick_pos.__dict__
-        init_post_pick_pos = uatype.POS6D()
-        init_post_pick_pos.__dict__ = post_pick_pos.__dict__
-        init_place_pos = uatype.POS6D()
-        init_place_pos.__dict__ = place_pos.__dict__
+        ua_conveyor_tigger_pos = uatype.Variant(conveyor_tigger_pos, uatype.Double)
+        ua_start_pos = uatype.POS6D()
+        ua_start_pos.__dict__ = start_pos.__dict__
+        ua_pre_pick_pos = uatype.POS6D()
+        ua_pre_pick_pos.__dict__ = pre_pick_pos.__dict__
+        ua_pick_pos = uatype.POS6D()
+        ua_pick_pos.__dict__ = pick_pos.__dict__
+        ua_post_pick_pos = uatype.POS6D()
+        ua_post_pick_pos.__dict__ = post_pick_pos.__dict__
+        ua_place_pos = uatype.POS6D()
+        ua_place_pos.__dict__ = place_pos.__dict__
 
-        self.log.info('------------PICK-PLACE--------------')
-        self.log.info(f'Conveyor trigger position: {conveyor_tigger_pos}')
-        self.log.info(f'Start position: {start_pos}')
-        self.log.info(f'Pre-Pick position: {pre_pick_pos}')
-        self.log.info(f'Pick position: {pick_pos}')
-        self.log.info(f'Post-Pick position: {post_pick_pos}')
-        self.log.info(f'Place position: {place_pos}')
-        self.log.info('------------------------------------')
-
-        self.wait_for_robot()
-        while True:
-            # Compute difference between conveyor position when the data was assembled
-            # and current conveyor position
-            conveyor_diff = robot_status_dict['conveyor_position'] - conveyor_init_pos
-            self.log.info(f'Pick Place attempt conveyor difference: {round(conveyor_diff, 2)}')
-
-            # Use the computed difference to offset the position values
-            ua_conveyor_tigger_pos = init_conveyor_tigger_pos + conveyor_diff
-
-            ua_start_pos = init_start_pos
-
-            ua_pre_pick_pos = init_pre_pick_pos
-            ua_pre_pick_pos.X = ua_pre_pick_pos.X + conveyor_diff
-
-            ua_pick_pos = init_pick_pos
-            ua_pick_pos.X = ua_pick_pos.X + conveyor_diff
-
-            ua_post_pick_pos = init_post_pick_pos
-            ua_post_pick_pos.X = ua_post_pick_pos.X + conveyor_diff
-
-            ua_place_pos = init_place_pos
-
-            # Check if the pick position does not excees the bounds of the picking area
-            if ua_post_pick_pos.X > max_pick_distance:
-                result = STATUS.SUCCESS
-                message = 'Did not start the program in time'
-                self.log.error(f'Failed to start Pick & Place program: {message}')
-                break
-
-            result, message = self.node_robot.call_method(f'{self.robot_ns_idx}:StartPickPlace',
-                                                          uatype.Variant(ua_conveyor_tigger_pos, uatype.Double),
-                                                          ua_start_pos,
-                                                          ua_pre_pick_pos,
-                                                          ua_pick_pos,
-                                                          ua_post_pick_pos,
-                                                          ua_place_pos)
-            if result == STATUS.SUCCESS:
-                self.log.info(f'Started Pick & Place program')
-                break
-            else:
-                self.log.error(f'Failed to start Pick & Place program: {message}')
-            time.sleep(0.2)
+        result, message = self.node_robot.call_method(
+            f'{self.robot_ns_idx}:StartPickPlace',
+            ua_conveyor_tigger_pos,
+            ua_start_pos,
+            ua_pre_pick_pos,
+            ua_pick_pos,
+            ua_post_pick_pos,
+            ua_place_pos,
+        )
+        if result == STATUS.SUCCESS:
+            self.log.info(f'Started Pick & Place program')
+        elif result == STATUS.ROBOT_BUSY:
+            pass
+        else:
+            self.log.error(f'Failed to start Pick & Place program: {message}')
         return result, message
 
     def conveyor_control(self, move_left: bool, move_right: bool):
         assert isinstance(move_left, bool)
         assert isinstance(move_right, bool)
 
-        status, message = self.node_conveyor.call_method(f'{self.transport_ns_idx}:ConveyorControl', 
-                                                         uatype.Variant(move_left, uatype.Boolean), 
-                                                         uatype.Variant(move_right, uatype.Boolean))
+        status, message = self.node_conveyor.call_method(
+            f'{self.transport_ns_idx}:ConveyorControl',
+            uatype.Variant(move_left, uatype.Boolean),
+            uatype.Variant(move_right, uatype.Boolean),
+        )
         if status == STATUS.SUCCESS:
             if not move_left and not move_right:
                 self.log.info(f'Stopped conveyor')
@@ -575,8 +582,10 @@ class OPCUA_Client:
     def gripper_control(self, grip: bool):
         assert isinstance(grip, bool)
 
-        status, message = self.node_robot.call_method(f'{self.robot_ns_idx}:GripperControl', 
-                                                         uatype.Variant(grip, uatype.Boolean))
+        status, message = self.node_robot.call_method(
+            f'{self.robot_ns_idx}:GripperControl', 
+            uatype.Variant(grip, uatype.Boolean)
+        )
         if status == STATUS.SUCCESS:
             if grip:
                 self.log.info(f'Enabled gripper')

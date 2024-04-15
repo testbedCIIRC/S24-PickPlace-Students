@@ -6,11 +6,8 @@ import numpy as np
 import cv2
 
 # Local imports
+from src.logging_setup import setup_logging
 from src.item import ITEM_TYPE, Item
-
-
-# Setup logging
-log = logging.getLogger('PickPlace-Logger')
 
 
 # Workstation with default json camera config
@@ -29,21 +26,27 @@ class DetectorHSV:
     Detects white and brown packets in image using HSV threasholding.
     """
 
-    def __init__(self, config) -> None:
+    def __init__(self, logging_config, detector_config) -> None:
+        # Setup logging
+        # Must happen before any logging function call
+        self.log = setup_logging('DETECTOR', logging_config)
+
         self.detected_items = []
         self.homography_matrix = None
         self.homography_determinant = None
 
-        self.ignore_vertical_px = config.ignore_vertical_px
-        self.ignore_horizontal_px = config.ignore_horizontal_px
+        self.ignore_vertical_px = detector_config.ignore_vertical_px
+        self.ignore_horizontal_px = detector_config.ignore_horizontal_px
 
-        self.max_ratio_error = config.max_ratio_error
+        self.max_ratio_error = detector_config.max_ratio_error
 
-        self.white_lower = np.array([config.white_lower])
-        self.white_upper = np.array([config.white_upper])
+        self.white_lower = np.array([detector_config.white_lower])
+        self.white_upper = np.array([detector_config.white_upper])
 
-        self.brown_lower = np.array([config.brown_lower])
-        self.brown_upper = np.array([config.brown_upper])
+        self.brown_lower = np.array([detector_config.brown_lower])
+        self.brown_upper = np.array([detector_config.brown_upper])
+
+        self.log.info(f'Initialized HSV packet detector')
 
     def set_homography(self, homography_matrix: np.ndarray) -> None:
         """
@@ -59,8 +62,7 @@ class DetectorHSV:
     def get_item_from_contour(
         self,
         contour: np.array,
-        type: int,
-        encoder_pos: float,
+        type: int
     ) -> Item:
         """
         Creates Item object from a contour
@@ -75,27 +77,24 @@ class DetectorHSV:
 
         item = Item()
         item.set_type(type)
-        item.set_position(centroid[0], centroid[1], encoder_pos)
+        item.set_centroid(centroid[0], centroid[1])
         item.set_dimensions(w, h)
 
         return item
 
-    def detect(self, rgb_image: np.ndarray, encoder_position: float) -> tuple[list[Item], np.ndarray]:
+    def detect(self, rgb_image: np.ndarray) -> list[Item]:
         """
         Detects items using HSV thresholding in an image
         """
         assert isinstance(rgb_image, np.ndarray)
-        assert isinstance(encoder_position, (int, float))
 
         self.detected_items = []
 
         if self.homography_determinant is None:
-            log.warning(f'HSV Detector: No homography matrix set')
+            self.log.warning(f'HSV Detector: No homography matrix set')
             return []
 
         frame_height, frame_width, frame_channel_count = rgb_image.shape
-
-        mask = np.zeros((frame_height, frame_width))
 
         # Get binary mask
         hsv_frame = cv2.cvtColor(rgb_image, cv2.COLOR_BGR2HSV)
@@ -121,21 +120,19 @@ class DetectorHSV:
             area_cm2 = abs(cv2.contourArea(contour) * self.homography_determinant) / 100
             object_type = 0
 
-            
-
             if 130 > area_cm2 > 70:
                 object_type = ITEM_TYPE.SMALL_WHITE_PACKET
             elif 200 > area_cm2 > 140:
                 object_type = ITEM_TYPE.MEDIUM_WHITE_PACKET
             elif 430 > area_cm2 > 300:
                 object_type = ITEM_TYPE.LARGE_WHITE_PACKET
+            elif 600 > area_cm2 > 300:
+                object_type = ITEM_TYPE.LARGE_WHITE_PACKET
             else:
                 continue
 
             # Get detected packet parameters
-            packet = self.get_item_from_contour(
-                contour, object_type, encoder_position
-            )
+            packet = self.get_item_from_contour(contour, object_type)
 
             # Check for packet squareness
             side_ratio = packet.width_px / packet.height_px
@@ -165,9 +162,7 @@ class DetectorHSV:
                 continue
 
             # Get detected packet parameters
-            packet = self.get_item_from_contour(
-                contour, object_type, encoder_position
-            )
+            packet = self.get_item_from_contour(contour, object_type)
 
             # Check for packet squareness
             side_ratio = packet.width_px / packet.height_px
@@ -184,8 +179,7 @@ class DetectorHSV:
 
             self.detected_items.append(packet)
 
-        binary_mask = mask.astype(bool)
-        return self.detected_items, binary_mask
+        return self.detected_items
     
     def draw_detections(self, rgb_image: np.ndarray) -> np.ndarray:
         """

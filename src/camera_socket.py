@@ -1,19 +1,23 @@
 # Standard imports
-import logging
 import socket
 from io import BytesIO
 
 # External imports
 import numpy as np
 
-
-# Setup logging
-log = logging.getLogger('PickPlace-Logger')
+# Local imports
+from src.logging_setup import setup_logging
 
 
 class CameraSocket(socket.socket):
-    def __init__(self, proto=0, fileno=None):
+    def __init__(self, logging_config, proto=0, fileno=None):
+        # Setup logging
+        # Must happen before any logging function call
+        self.log = setup_logging('CAMERA', logging_config)
+
         super().__init__(socket.AF_INET, socket.SOCK_STREAM, proto, fileno)
+
+        self.log.info(f'Initialized RealSense camera socket')
 
     def accept(self):
         fd, addr = super()._accept()
@@ -31,7 +35,7 @@ class CameraSocket(socket.socket):
         payload = super().recv(1024)
         # Check if payload exists and contains acknowledge
         if not payload or not b'ACKNOWLEDGE' in payload:
-            log.error(f'Wrong acknowledge received from socket: {payload}')
+            self.log.error(f'Wrong acknowledge received from socket: {payload}')
             return False
         
         return True
