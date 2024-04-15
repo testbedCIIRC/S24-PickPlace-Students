@@ -1,7 +1,7 @@
 # Standard imports
 import time
 from math import sqrt
-from collections import namedtuple
+from collections import namedtuple, deque
 
 # External imports
 import numpy as np
@@ -15,6 +15,8 @@ class ITEM_TYPE():
     LARGE_WHITE_PACKET = 102
     MEDIUM_BROWN_PACKET = 103
     LARGE_BROWN_PACKET = 104
+    # TODO: define item materials, use range 200 to 299
+    # Each type will be used to select destination box for sorting
 
 
 class Item:
@@ -45,8 +47,12 @@ class Item:
         # of the position where the item last last detected by the camera.
         self.centroid_px = self.PointTuple(0.0, 0.0)
 
-        # Last detected position of encoder in pixels
-        self.last_encoder_position = 0.0
+        # List of depth values
+        # New values are added to the left, oldest disappear on the right
+        self.centroid_depth_list = deque([0.0], maxlen=20)
+
+        # Position of encoder during last detection in millimeters
+        self.last_conveyor_position_mm = 0.0
 
         # Indicates if command to pick this item was sent
         self.processed = False
@@ -97,14 +103,17 @@ class Item:
 
         self.type = item_type
 
-    def set_position(self, x: int, y: int, encoder_position: float) -> None:
+    def set_centroid(self, x: int, y: int) -> None:
         assert isinstance(x, int)
         assert isinstance(y, int)
-        assert isinstance(encoder_position, (int, float))
 
         self.centroid_px = self.PointTuple(x, y)
-        self.last_encoder_position = encoder_position
 
+    def set_conveyor_position_mm(self, conveyor_position_mm: float) -> None:
+        assert isinstance(conveyor_position_mm, (int, float))
+
+        self.last_conveyor_position_mm = conveyor_position_mm    
+    
     def set_dimensions(self, width_px: int, height_px: int) -> None:
         assert isinstance(width_px, int)
         assert isinstance(height_px, int)
@@ -112,14 +121,22 @@ class Item:
         self.width_px = width_px
         self.height_px = height_px
 
-    def update(self, new_item, encoder_position) -> None:
+    def add_centroid_depth_value(self, depth_image: np.ndarray) -> None:
+        assert isinstance(depth_image, np.ndarray)
+        assert len(depth_image.shape) == 2 # Depth image should be 2D numpy array
+
+        centroid_depth_value = depth_image[self.centroid_px.y, self.centroid_px.x]
+        self.centroid_depth_list.appendleft(centroid_depth_value)
+
+    def update(self, new_item, conveyor_position_mm) -> None:
         assert isinstance(new_item, Item)
-        assert isinstance(encoder_position, (int, float))
+        assert isinstance(conveyor_position_mm, (int, float))
         assert self.id == new_item.id
 
         self.update_timestamp()
         self.set_type(new_item.type)
-        self.set_position(new_item.centroid_px.x, new_item.centroid_px.y, encoder_position)
+        self.set_centroid(new_item.centroid_px.x, new_item.centroid_px.y)
+        self.set_conveyor_position_mm(new_item.last_conveyor_position_mm)
         self.set_dimensions(new_item.width_px, new_item.height_px)
         self.disappeared_frame_count = 0
 
@@ -151,7 +168,10 @@ class Item:
         assert homography_matrix.shape[1] == 3
 
         centroid_mm = self.get_centroid_in_mm(homography_matrix)
-        return self.PointTuple(centroid_mm[0] + (encoder_position - self.last_encoder_position), centroid_mm[1])
+        return self.PointTuple(centroid_mm[0] + (encoder_position - self.last_conveyor_position_mm), centroid_mm[1])
+    
+    def get_avg_centroid_depth_value(self) -> int | float:
+        return np.average(self.centroid_depth_list)
 
     ##########
     # YOLOv8 #

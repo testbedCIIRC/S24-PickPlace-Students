@@ -1,14 +1,12 @@
 # Standard imports
-import logging
 import json
 
 # External imports
 import cv2
 import numpy as np
 
-
-# Setup logging
-log = logging.getLogger('PickPlace-Logger')
+# Local imports
+from src.logging_setup import setup_logging
 
 
 class ApriltagHomography:
@@ -17,10 +15,13 @@ class ApriltagHomography:
     which transforms coordinates in pixels to coordinates defined by detected April Tags.
     """
 
-    def __init__(self):
+    def __init__(self, logging_config):
         """
-        ProcessingApriltag object constructor.
+        ApriltagHomography object constructor.
         """
+        # Setup logging
+        # Must happen before any logging function call
+        self.log = setup_logging('HOMOGRAPHY', logging_config)
 
         self.world_points = None
 
@@ -35,6 +36,8 @@ class ApriltagHomography:
         self.aruco_dictionary = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_APRILTAG_36h11)
         self.aruco_parameters =  cv2.aruco.DetectorParameters()
         self.aruco_detector = cv2.aruco.ArucoDetector(self.aruco_dictionary, self.aruco_parameters)
+
+        self.log.info(f'Initialized Apriltag detector')
 
     def load_tag_coordinates(self, file_path: str):
         """
@@ -106,9 +109,16 @@ class ApriltagHomography:
                 np.array(self.image_points_detect), np.array(self.world_points_detect)
             )
         else:
-            log.warning(f'Less than 4 AprilTags found in frame, homography matrix was not computed')
+            self.log.warning(f'Less than 4 AprilTags found in frame, homography matrix was not computed')
 
         return self.homography
+    
+    def compute_base_depth(self, depth_image: np.ndarray) -> int | float:
+        avg_tag_depth_list = []
+        for tag_centroid in self.image_points_detect:
+            tag_depth_value = depth_image[tag_centroid[1], tag_centroid[0]]
+            avg_tag_depth_list.append(tag_depth_value)
+        return np.average(avg_tag_depth_list)
 
     def draw_tags(self, image_frame: np.ndarray) -> np.ndarray:
         """

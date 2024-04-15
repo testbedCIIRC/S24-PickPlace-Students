@@ -1,6 +1,6 @@
 {
     "pick_place": {
-        "tool_id": 2,
+        "tool_id": 1,
         "base_id": 1,
         "home_pos": {
             "x": 900.00,

@@ -1,5 +1,4 @@
 # Standard imports
-import logging
 
 # External imports
 import numpy as np
@@ -7,12 +6,9 @@ import cv2
 from scipy.spatial import distance as dist
 
 # Local imports
+from src.logging_setup import setup_logging
 from src.item import Item
 from src.graphics_functions import drawText
-
-
-# Setup logging
-log = logging.getLogger('PickPlace-Logger')
 
 
 class ItemTracker:
@@ -20,16 +16,22 @@ class ItemTracker:
     Class for tracking items between frames
     """
 
-    def __init__(self, config):
+    def __init__(self, logging_config, tracker_config):
         """
         Constructor
         """
 
+        # Setup logging
+        # Must happen before any logging function call
+        self.log = setup_logging('TRACKER', logging_config)
+
         self.tracked_item_list = []
         self.next_item_id = 0
 
-        self.max_item_distance = config.max_item_distance
-        self.max_disappeared_frames = config.frames_to_deregister
+        self.max_item_distance = tracker_config.max_item_distance
+        self.max_disappeared_frames = tracker_config.frames_to_deregister
+
+        self.log.info(f'Initialized Distance tracker')
 
     def register_item(self, item: Item):
         """
@@ -59,10 +61,11 @@ class ItemTracker:
                 del self.tracked_item_list[tracked_item_index]
                 break
 
-    def track_items(self, detected_item_list: list[Item],
-                    conveyor_position_mm: float,
-                    depth_image: np.ndarray,
-                    mask) -> list[Item]:
+    def track_items(
+            self,
+            detected_item_list: list[Item],
+            conveyor_position_mm: float,
+        ) -> list[Item]:
         """
         Labels input items with IDs from tracked item database, depending on distance.
         """
@@ -150,8 +153,8 @@ class ItemTracker:
                 )
 
                 # Draw packet centroid value in pixels
-                packet_centroid_px = item.get_centroid_in_px()
-                text_centroid_px = f'X: {packet_centroid_px.x}, Y: {packet_centroid_px.y} (px)'
+                item_centroid_px = item.get_centroid_in_px()
+                text_centroid_px = f'X: {item_centroid_px.x}, Y: {item_centroid_px.y} (px)'
                 display_rgb_image = drawText(
                     display_rgb_image,
                     text_centroid_px,
@@ -160,11 +163,21 @@ class ItemTracker:
                 )
 
                 # Draw packet centroid value in milimeters
-                packet_centroid_mm = item.get_centroid_in_mm(homography_matrix)
-                text_centroid_mm = f'X: {round(packet_centroid_mm.x, 2)}, Y: {round(packet_centroid_mm.y, 2)} (mm)'
+                # item_centroid_mm = item.get_centroid_in_mm(homography_matrix)
+                # text_centroid_mm = f'X: {round(item_centroid_mm.x, 2)}, Y: {round(item_centroid_mm.y, 2)} (mm)'
+                # display_rgb_image = drawText(
+                #     display_rgb_image,
+                #     text_centroid_mm,
+                #     (item.centroid_px.x + 10, item.centroid_px.y + int(80 * text_size)),
+                #     text_size,
+                # )
+
+                # Draw packet depth
+                item_centroid_depth = item.get_avg_centroid_depth_value()
+                text_depth_mm = f'Depth: {round(item_centroid_depth, 2)}'
                 display_rgb_image = drawText(
                     display_rgb_image,
-                    text_centroid_mm,
+                    text_depth_mm,
                     (item.centroid_px.x + 10, item.centroid_px.y + int(80 * text_size)),
                     text_size,
                 )
