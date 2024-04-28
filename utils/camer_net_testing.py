@@ -18,11 +18,8 @@ camera = DepthCamera(config_path=Path("C:/Users/Testbed/CIIRC_DTU_3WEEK_NEW/cv_p
 
 
 def run(frame,model):
-        
-        
-        ouput = model(frame)
-        
-        return ouput
+    ouput = model(frame)
+    return ouput
 
             
 
