@@ -28,7 +28,6 @@ from src.item_tracker import ItemTracker
 from src.camera_socket import CameraSocket
 from src.detector_hsv import DetectorHSV
 from src.graphics_functions import drawText, colorizeDepthFrame, show_boot_screen
-from src.detector_YOLOv8_material import DetectorYOLOv8Material
 
 # Class meant to map the TOML config dictionary to python object for easier use
 class Config:
@@ -108,6 +107,7 @@ if __name__ == '__main__':
 
     elif config.detector.type == 'YOLOv8_material':
         # TODO: Any external inicialization for the detector should be put here
+        from src.detector_YOLOv8_material import DetectorYOLOv8Material
         detector = DetectorYOLOv8Material(config.logging, config.detector.YOLOv8_material)
     
     elif config.detector.type == 'YOLOv8_object':
@@ -145,6 +145,8 @@ if __name__ == '__main__':
     program_halt = False # Used to halt program from executing certain actions
     program_halt_triggered = False # Used to detect rising edge of the operator safety signal
     base_depth = config.homography.base_camera_depth # Zero depth level (on conveyor belt) in camera frame
+    detected_item_list = [] # Python list for storing detected objects
+    tracked_item_list = [] # Python list for storing tracked objects
 
     while True:
         # Start timer for FPS estimation
@@ -290,22 +292,15 @@ if __name__ == '__main__':
         for item in detected_item_list:
             item.set_conveyor_position_mm(conveyor_position_mm)
 
-        # Disable detection during safe operational stop
-        # This is to allow packet placement in front of camera
-        # without detection glitches from hand movement
-        if program_halt:
-            detected_item_list = []
-
         # ITEM TRACKING
         ###############
-            
+        
         # Update tracked packets from detected packets
         tracked_item_list = item_tracker.track_items(detected_item_list, conveyor_position_mm)
 
         # Update depth of each item centroid for all tracked items
-        if not program_halt:
-            for item in tracked_item_list:
-                item.add_centroid_depth_value(depth_image)
+        for item in tracked_item_list:
+            item.add_centroid_depth_value(depth_image)
 
         # Draw tracked items into the screen
         if config.tracking.show_tracked_items:
@@ -313,7 +308,7 @@ if __name__ == '__main__':
                                                                 conveyor_position_mm,
                                                                 homography_matrix,
                                                                 config.graphics.text_size)
-        
+    
         # ROBOT CONTROL
         ###############
             
