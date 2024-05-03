@@ -17,6 +17,10 @@ class ITEM_TYPE():
     LARGE_BROWN_PACKET = 104
     # TODO: define item materials, use range 200 to 299
     # Each type will be used to select destination box for sorting
+    MATERIAL_REST = 200
+    MATERIAL_PLASTIC = 201
+    MATERIAL_PAPER = 202
+    MATERIAL_METAL = 203
 
 
 class Item:
