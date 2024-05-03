@@ -21,7 +21,7 @@ import ntplib
 
 # Local imports
 from src.logging_setup import setup_logging
-from src.item import Item
+from src.item import Item, ITEM_TYPE
 from src.opcua_client import ROBOT_COMMAND, POS6D, status_process_handler, command_process_handler, load_opcua_datatypes
 from src.apriltag_homography import ApriltagHomography
 from src.item_tracker import ItemTracker
@@ -38,6 +38,13 @@ class Config:
                 setattr(self, k, [Config(x) if isinstance(x, dict) else x for x in v])
             else:
                 setattr(self, k, Config(v) if isinstance(v, dict) else v)
+
+ITEMTYPE2POS_MAP = {
+    ITEM_TYPE.MATERIAL_PLASTIC: 0,
+    ITEM_TYPE.MATERIAL_PAPER: 1,
+    ITEM_TYPE.MATERIAL_METAL: 2,
+    ITEM_TYPE.MATERIAL_REST: 2,
+}
 
 if __name__ == '__main__':
     # Import config file
@@ -335,6 +342,8 @@ if __name__ == '__main__':
                     log.warning(f'Computed item height was lower than allowed minimum height: {z_height_pick:.2f} VS {config.pick_place.z_height_min:.2f}')
                     z_height_pick = config.pick_place.z_height_min
 
+                place_pos_id = ITEMTYPE2POS_MAP.get(item.type, 0)
+
                 start_pos = last_place_position
 
                 pre_pick_pos = POS6D(
@@ -377,14 +386,14 @@ if __name__ == '__main__':
                 )
 
                 place_pos = POS6D(
-                    X = robot_poses['pick_place']['place_pos_list'][0]['x'],
-                    Y = robot_poses['pick_place']['place_pos_list'][0]['y'],
-                    Z = robot_poses['pick_place']['place_pos_list'][0]['z'],
-                    A = robot_poses['pick_place']['place_pos_list'][0]['a'],
-                    B = robot_poses['pick_place']['place_pos_list'][0]['b'],
-                    C = robot_poses['pick_place']['place_pos_list'][0]['c'],
-                    Status = robot_poses['pick_place']['place_pos_list'][0]['status'],
-                    Turn = robot_poses['pick_place']['place_pos_list'][0]['turn'],
+                    X = robot_poses['pick_place']['place_pos_list'][place_pos_id]['x'],
+                    Y = robot_poses['pick_place']['place_pos_list'][place_pos_id]['y'],
+                    Z = robot_poses['pick_place']['place_pos_list'][place_pos_id]['z'],
+                    A = robot_poses['pick_place']['place_pos_list'][place_pos_id]['a'],
+                    B = robot_poses['pick_place']['place_pos_list'][place_pos_id]['b'],
+                    C = robot_poses['pick_place']['place_pos_list'][place_pos_id]['c'],
+                    Status = robot_poses['pick_place']['place_pos_list'][place_pos_id]['status'],
+                    Turn = robot_poses['pick_place']['place_pos_list'][place_pos_id]['turn'],
                     ToolFrameID = robot_poses['pick_place']['tool_id'],
                     BaseFrameID = robot_poses['pick_place']['base_id'],
                 )
@@ -406,7 +415,7 @@ if __name__ == '__main__':
                         ]
                     )
                 )
-                log.info(f'Sent Pick Place start request for item with ID {item.id}')
+                log.info(f'Sent Pick Place start request for item with ID {item.id} type {item.class_name}')
 
         # Remove processed items from tracked list
         for item in tracked_item_list:
