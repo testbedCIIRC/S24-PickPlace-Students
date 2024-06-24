@@ -4,7 +4,7 @@ import ntplib
 import cv2
 import numpy as np
 
-from robot_pos import RobotPos
+from robot_controler import RobotControl
 from remotecamera import *
 
 #SERVER_IP = '10.100.1.214'
@@ -28,7 +28,7 @@ if __name__ == "__main__":
         csv = open(f"positions_{int(time.time())}.csv", "w")
         csv.write("frame_name,X,Y,Z,A,B,C,Status,Turn\n")
 
-        rob = RobotPos()
+        rob = RobotControl()
         rob.connect()
         
     while True:

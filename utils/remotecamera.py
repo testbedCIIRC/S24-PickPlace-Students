@@ -1,8 +1,9 @@
 import socket
 from io import BytesIO
-
+import time
 import numpy as np
 import cv2
+import cv2.aruco as aruco
 
 def colorizeDepthFrame(
     depth_frame: np.ndarray, camera_belt_dist_mm: int = 785
@@ -86,11 +87,25 @@ class RemoteCamera:
         self.client = NumpyArraySocket()
         self.client.connect((ip, port)) # Connect to the port and host
         print('Client running')
+        self.rgb_image = None
+        self.depth_image = None
+
 
         self.buffer = BytesIO()
 
     def disconnect(self):
+        self.thread_stop = True
         self.client.close()
+
+    def update_th(self):
+        self.thread_stop = False
+        while not self.thread_stop:
+            self.frames_ready = False
+            self.recv_next_frame()
+            self.depth_image  = self.get_frame_depth()
+            self.rgb_image = self.get_frame_rgb()
+            self.frames_ready = True
+            time.sleep(0.1)
 
     def recv_next_frame(self):
         self.frame_data = self.client.recv_data(16_000_000)
@@ -115,3 +130,58 @@ class RemoteCamera:
         self.buffer.write(self.frame_data.split(b'FRAME_RGB')[1])
         self.buffer.seek(0)
         return np.load(self.buffer)
+    
+    
+class ImageProcessing:
+    def __init__(self, camera_params_path = "kalibrace/cam_calib.npy"):
+        self.ret, self.mtx, self.dist, self.rvecs, self.tvecs = np.load(camera_params_path, allow_pickle=True)
+        self.aruco_dict = cv2.aruco.Dictionary_get(cv2.aruco.DICT_APRILTAG_36h11)
+        self.parameters = cv2.aruco.DetectorParameters_create()
+    
+    def detect_aruco(self, image, aruco_id = 10):
+        corners, ids, rejected_img_points = aruco.detectMarkers(image, self.aruco_dict,
+                                                                parameters=self.parameters,
+                                                                cameraMatrix=self.mtx,
+                                                                distCoeff=self.dist)
+        if ids is not None and aruco_id in ids:
+            tag_index = np.where(ids == aruco_id)[0][0]
+            return np.array(corners[tag_index][0])
+        return None
+    
+    def aruco_is_captured(self, image, aruco_id = 10):
+        corners = self.detect_aruco(image, aruco_id)
+        if corners is None:# or len(corners) != 4:
+            return False
+        return True
+    
+    def get_aruco_xyz(self, rgb_image, depth_image, aruco_id):
+        corners = self.detect_aruco(rgb_image, aruco_id)
+        if corners is None or len(corners) != 4:
+            return None
+        # indices of corners
+        #aruco tag doesnt have to be squere in image, crop it so it is
+        umin = np.max([corners[0][0], corners[3][0]]).astype(np.int64)
+        umax = np.min([corners[1][0], corners[2][0]]).astype(np.int64)
+        vmin = np.max([corners[0][1], corners[1][1]]).astype(np.int64) 
+        vmax = np.min([corners[2][1], corners[3][1]]).astype(np.int64)
+        aruco_depths = depth_image.T[umin:umax, vmin:vmax]
+        z = np.mean(aruco_depths > 0)
+        corners_xyz = []
+        for i in range(len(corners)):
+            uv = corners[i]
+            xyz = self.project_uv_to_plane(uv, z)
+            corners_xyz.append(xyz)
+        return corners_xyz
+            
+
+    def project_uv_to_plane(self, uv, z):
+        uv_hom = np.array([[uv[0]], [uv[1]], [1]])
+        print(uv_hom)
+        K_inv = np.linalg.inv(self.mtx)
+        point_cam = np.dot(K_inv, uv_hom)
+        print(point_cam)
+        plane_eq = np.array([0, 0, 1, -z])
+        print(plane_eq)
+        t = -plane_eq.dot(np.append(point_cam.flatten(), 1)) / (plane_eq[:3].dot(point_cam.flatten()))
+        intersection_point = point_cam.flatten() * t
+        return intersection_point
